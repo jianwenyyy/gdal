@@ -60,6 +60,10 @@
 #include "gdal_alg_priv.h"
 #include "gdal_thread_pool.h"
 #include "gdalwarpkernel_opencl.h"
+#include <iostream>
+#include <fstream>
+#include <iostream>
+#include <fstream>
 
 // #define CHECK_SUM_WITH_GEOS
 #ifdef CHECK_SUM_WITH_GEOS
@@ -5602,7 +5606,63 @@ static CPLErr GWKRealCase(GDALWarpKernel *poWK)
 
 /************************************************************************/
 /*                GWKResampleNoMasksOrDstDensityOnlyThreadInternal()    */
+void saveArrayToFile(unsigned char* array, int rows, int cols, const std::string& filename) {
+    std::ofstream file(filename, std::ios::binary);
+
+    if (!file) {
+        std::cerr << "Failed to open file for writing." << std::endl;
+        return;
+    }
+
+    file.write(reinterpret_cast<const char*>(array), sizeof(unsigned char) * rows * cols);
+    file.close();
+
+    std::cout << "Array saved to file: " << filename << std::endl;
+}
+
+void loadArrayFromFile(unsigned char* array, int rows, int cols, const std::string& filename) {
+    std::ifstream file(filename, std::ios::binary);
+
+    if (!file) {
+        std::cerr << "Failed to open file for reading." << std::endl;
+        return;
+    }
+
+    file.read(reinterpret_cast<char*>(array), sizeof(unsigned char) * rows * cols);
+    file.close();
+
+    std::cout << "Array loaded from file: " << filename << std::endl;
+}
+
 /************************************************************************/
+
+void saveArrayToFile(unsigned char* array, int rows, int cols, const std::string& filename) {
+    std::ofstream file(filename, std::ios::binary);
+
+    if (!file) {
+        std::cerr << "Failed to open file for writing." << std::endl;
+        return;
+    }
+
+    file.write(reinterpret_cast<const char*>(array), sizeof(unsigned char) * rows * cols);
+    file.close();
+
+    std::cout << "Array saved to file: " << filename << std::endl;
+}
+
+void loadArrayFromFile(unsigned char* array, int rows, int cols, const std::string& filename) {
+    std::ifstream file(filename, std::ios::binary);
+
+    if (!file) {
+        std::cerr << "Failed to open file for reading." << std::endl;
+        return;
+    }
+
+    file.read(reinterpret_cast<char*>(array), sizeof(unsigned char) * rows * cols);
+    file.close();
+
+    std::cout << "Array loaded from file: " << filename << std::endl;
+}
 
 template <class T, GDALResampleAlg eResample, int bUse4SamplesFormula>
 static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
@@ -5675,6 +5735,7 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
                              padfY, padfZ, pabSuccess);
         if (dfSrcCoordPrecision > 0.0)
         {
+            printf(" Something wrong!!!  contact jianwen yan for details!!!!\n");
             GWKRoundSourceCoordinates(
                 nDstXSize, padfX, padfY, padfZ, pabSuccess, dfSrcCoordPrecision,
                 dfErrorThreshold, poWK->pfnTransformer, psJob->pTransformerArg,
@@ -5727,6 +5788,41 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
                 {
                     GWKResampleNoMasksT(
                         poWK, iBand, padfX[iDstX] - poWK->nSrcXOff,
+#if 1
+    std::string f1 = "/root/gdal-compile/ori_c1.dat";
+    std::string f2 = "/root/gdal-compile/ori_c2.dat";
+    std::string f3 = "/root/gdal-compile/ori_c3.dat";
+    std::string f1c = "/root/gdal-compile/cur_c1.dat";
+    std::string f2c = "/root/gdal-compile/cur_c2.dat";
+    std::string f3c = "/root/gdal-compile/cur_c3.dat";
+    saveArrayToFile(poWK->papabyDstImage[0], poWK->nDstYSize, poWK->nDstXSize, f1c);
+    saveArrayToFile(poWK->papabyDstImage[1], poWK->nDstYSize, poWK->nDstXSize, f2c);
+    saveArrayToFile(poWK->papabyDstImage[2], poWK->nDstYSize, poWK->nDstXSize, f3c);
+
+    unsigned char* c1 = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+    unsigned char* c2 = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+    unsigned char* c3 = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+
+    unsigned char* c1c = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+    unsigned char* c2c = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+    unsigned char* c3c = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+
+    std::cout << poWK->nDstYSize << poWK->nDstXSize << std::endl;
+    loadArrayFromFile(c1, poWK->nDstYSize, poWK->nDstXSize, f1);
+    loadArrayFromFile(c2, poWK->nDstYSize, poWK->nDstXSize, f2);
+    loadArrayFromFile(c3, poWK->nDstYSize, poWK->nDstXSize, f3);
+
+    loadArrayFromFile(c1c, poWK->nDstYSize, poWK->nDstXSize, f1c);
+    loadArrayFromFile(c2c, poWK->nDstYSize, poWK->nDstXSize, f2c);
+    loadArrayFromFile(c3c, poWK->nDstYSize, poWK->nDstXSize, f3c);
+
+    for(int i = 0; i < poWK->nDstYSize * poWK->nDstXSize; ++i) {
+        if(c1[i] != c1c[i] || c2[i] != c2c[i] || c3[i] != c3c[i]) {
+            printf(" i = %d result differ!!\n", i);
+        }
+    }
+#endif
+
                         padfY[iDstX] - poWK->nSrcYOff, &value, padfWeight);
                 }
 
@@ -5743,7 +5839,7 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
 
                 if (poWK->pafDstDensity)
                     poWK->pafDstDensity[iDstOffset] = 1.0f;
-
+                
                 reinterpret_cast<T *>(poWK->papabyDstImage[iBand])[iDstOffset] =
                     value;
             }
@@ -5757,6 +5853,41 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
         if (psJob->pfnProgress && psJob->pfnProgress(psJob))
             break;
     }
+#if 0
+    std::string f1 = "/root/gdal-compile/ori_c1.dat";
+    std::string f2 = "/root/gdal-compile/ori_c2.dat";
+    std::string f3 = "/root/gdal-compile/ori_c3.dat";
+    std::string f1c = "/root/gdal-compile/cur_c1.dat";
+    std::string f2c = "/root/gdal-compile/cur_c2.dat";
+    std::string f3c = "/root/gdal-compile/cur_c3.dat";
+    saveArrayToFile(poWK->papabyDstImage[0], poWK->nDstYSize, poWK->nDstXSize, f1c);
+    saveArrayToFile(poWK->papabyDstImage[1], poWK->nDstYSize, poWK->nDstXSize, f2c);
+    saveArrayToFile(poWK->papabyDstImage[2], poWK->nDstYSize, poWK->nDstXSize, f3c);
+
+    unsigned char* c1 = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+    unsigned char* c2 = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+    unsigned char* c3 = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+
+    unsigned char* c1c = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+    unsigned char* c2c = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+    unsigned char* c3c = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+
+    std::cout << poWK->nDstYSize << poWK->nDstXSize << std::endl;
+    loadArrayFromFile(c1, poWK->nDstYSize, poWK->nDstXSize, f1);
+    loadArrayFromFile(c2, poWK->nDstYSize, poWK->nDstXSize, f2);
+    loadArrayFromFile(c3, poWK->nDstYSize, poWK->nDstXSize, f3);
+
+    loadArrayFromFile(c1c, poWK->nDstYSize, poWK->nDstXSize, f1c);
+    loadArrayFromFile(c2c, poWK->nDstYSize, poWK->nDstXSize, f2c);
+    loadArrayFromFile(c3c, poWK->nDstYSize, poWK->nDstXSize, f3c);
+
+    for(int i = 0; i < poWK->nDstYSize * poWK->nDstXSize; ++i) {
+        if(c1[i] != c1c[i] || c2[i] != c2c[i] || c3[i] != c3c[i]) {
+            printf(" i = %d result differ!!\n", i);
+        }
+    }
+#endif
+
 
     /* -------------------------------------------------------------------- */
     /*      Cleanup and return.                                             */
