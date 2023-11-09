@@ -5845,109 +5845,50 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
             dst_x_end = dst_x >= dst_x_end ? dst_x : dst_x_end;
         }
     } 
-    int x_s = INT_MAX, y_s = INT_MAX, x_e = INT_MIN, y_e = INT_MIN;
     /* ==================================================================== */
     /*      Loop over output lines.                                         */
     /* ==================================================================== */
-    for (int iDstY = iYMin; iDstY < iYMax; iDstY++)
+    for (int iDstY = dst_y_start; iDstY <= dst_y_end; iDstY++)
     {
-        /* --------------------------------------------------------------------
-         */
-        /*      Setup points to transform to source image space. */
-        /* --------------------------------------------------------------------
-         */
-        memcpy(padfX, padfX + nDstXSize, sizeof(double) * nDstXSize);
-        const double dfY = iDstY + 0.5 + poWK->nDstYOff;
-        for (int iDstX = 0; iDstX < nDstXSize; iDstX++)
-            padfY[iDstX] = dfY;
-
-        /* --------------------------------------------------------------------
-         */
-        /*      Transform the points from destination pixel/line coordinates */
-        /*      to source pixel/line coordinates. */
-        /* --------------------------------------------------------------------
-         */
-        memset(padfZ, 0, sizeof(double) * nDstXSize);
-        //poWK->pfnTransformer(psJob->pTransformerArg, TRUE, nDstXSize, padfX_2,
-        //                     padfY_2, padfZ_2, pabSuccess_2);
-        
-        
-        ApproxTransformInfo *psATInfo = static_cast<ApproxTransformInfo *>(psJob->pTransformerArg);
-
-        GDALGenImgProjTransformInfo *psInfo =
-        static_cast<GDALGenImgProjTransformInfo *>(psATInfo->pBaseCBData);
-        double* padfGeoTransform = psInfo->adfDstGeoTransform;
-        //printf("padfGeoTransform: %f %f %f %f %f %f\n", padfGeoTransform[0], padfGeoTransform[1], padfGeoTransform[2], padfGeoTransform[3], padfGeoTransform[4], padfGeoTransform[5]); 
-        padfGeoTransform = psInfo->adfSrcInvGeoTransform;
-        //printf("src padfGeoTransform: %f %f %f %f %f %f\n", padfGeoTransform[0], padfGeoTransform[1], padfGeoTransform[2], padfGeoTransform[3], padfGeoTransform[4], padfGeoTransform[5]); 
-
-       
-        ApproxTransformInfo *psATInfo = static_cast<ApproxTransformInfo *>(psJob->pTransformerArg);
-
-        GDALGenImgProjTransformInfo *psInfo =
-        static_cast<GDALGenImgProjTransformInfo *>(psATInfo->pBaseCBData);
-        double* padfGeoTransform = psInfo->adfDstGeoTransform;
-        //printf("padfGeoTransform: %f %f %f %f %f %f\n", padfGeoTransform[0], padfGeoTransform[1], padfGeoTransform[2], padfGeoTransform[3], padfGeoTransform[4], padfGeoTransform[5]); 
-        padfGeoTransform = psInfo->adfSrcInvGeoTransform;
-        //printf("src padfGeoTransform: %f %f %f %f %f %f\n", padfGeoTransform[0], padfGeoTransform[1], padfGeoTransform[2], padfGeoTransform[3], padfGeoTransform[4], padfGeoTransform[5]); 
-
-        for (int i = 0; i < nDstXSize; i++)
+        for (int iDstX = dst_x_start; iDstX <= dst_x_end; iDstX++)
         {
+            double dstfx= iDstX + 0.5 + poWK->nDstXOff, dstfy = iDstY + 0.5 + poWK->nDstYOff;
+            double srcfx = 0., srcfy = 0.;
             //panSuccess[i] = (padfX[i] != HUGE_VAL && padfY[i] != HUGE_VAL);
-            pabSuccess[i] = 1; 
+            //pabSuccess[i] = 1; 
             padfGeoTransform = psInfo->adfDstGeoTransform;
             double dfNewX = padfGeoTransform[0] +
-                                  padfX[i] * padfGeoTransform[1] +
-                                  padfY[i] * padfGeoTransform[2];
+                                  dstfx * padfGeoTransform[1] +
+                                  dstfy * padfGeoTransform[2];
             double dfNewY = padfGeoTransform[3] +
-                                  padfX[i] * padfGeoTransform[4] +
-                                  padfY[i] * padfGeoTransform[5];
-
-            padfX[i] = dfNewX;
-            padfY[i] = dfNewY;
-
+                                  dstfx * padfGeoTransform[4] +
+                                  dstfy * padfGeoTransform[5];
             padfGeoTransform = psInfo->adfSrcInvGeoTransform; 
-            dfNewX = padfGeoTransform[0] +
-                                  padfX[i] * padfGeoTransform[1] +
-                                  padfY[i] * padfGeoTransform[2];
-            dfNewY = padfGeoTransform[3] +
-                                  padfX[i] * padfGeoTransform[4] +
-                                  padfY[i] * padfGeoTransform[5];
+            srcfx = padfGeoTransform[0] +
+                                  dfNewX * padfGeoTransform[1] +
+                                  dfNewY * padfGeoTransform[2];
+            srcfy = padfGeoTransform[3] +
+                                  dfNewX * padfGeoTransform[4] +
+                                  dfNewY * padfGeoTransform[5];
+            if (dfSrcCoordPrecision > 0.0)
+            {
+                printf(" [todo:jw] Something wrong!!!  contact jianwen yan for details!!!!\n");
+                GWKRoundSourceCoordinates(
+                    nDstXSize, padfX, padfY, padfZ, pabSuccess, dfSrcCoordPrecision,
+                    dfErrorThreshold, poWK->pfnTransformer, psJob->pTransformerArg,
+                    0.5 + poWK->nDstXOff, iDstY + 0.5 + poWK->nDstYOff);
+            }
 
-            padfX[i] = dfNewX;
-            padfY[i] = dfNewY;
-        }
-
-        if (dfSrcCoordPrecision > 0.0)
-        {
-            printf(" [todo:jw] Something wrong!!!  contact jianwen yan for details!!!!\n");
-            GWKRoundSourceCoordinates(
-                nDstXSize, padfX, padfY, padfZ, pabSuccess, dfSrcCoordPrecision,
-                dfErrorThreshold, poWK->pfnTransformer, psJob->pTransformerArg,
-                0.5 + poWK->nDstXOff, iDstY + 0.5 + poWK->nDstYOff);
-        }
-
-        /* ====================================================================
-         */
-        /*      Loop over pixels in output scanline. */
-        /* ====================================================================
-         */
-        //printf("nSrcXSize = %d nSrcYSize = %d SrcXOFF = %d SrcYOFF = %d\n", nSrcXSize, nSrcYSize, poWK->nSrcXOff,poWK->nSrcYOff);
-        //printf("nDstXSize = %d nDstYSize = %d DstXOFF = %d DstYOFF = %d\n", nDstXSize, poWK->nDstYSize, poWK->nDstXOff,poWK->nDstYOff);
-        
-        /* yjw!! check  dst_y_s, dst_y_e, dst_x_s, dst_x_e,
-        */
-        for (int iDstX = 0; iDstX < nDstXSize; iDstX++)
-        {
-            GPtrDiff_t iSrcOffset = 0;
-            if (!GWKCheckAndComputeSrcOffsets(psJob, pabSuccess, iDstX, iDstY,
-                                              padfX, padfY, nSrcXSize,
-                                              nSrcYSize, iSrcOffset))
-                continue;
-            x_s = iDstX <= x_s? iDstX: x_s; 
-            y_s = iDstY <= y_s? iDstY: y_s;
-            x_e = iDstX >= x_e? iDstX: x_e; 
-            y_e = iDstY >= y_e? iDstY: y_e; 
+            /* ====================================================================
+             */
+            /*      Loop over pixels in output scanline. */
+            /* ====================================================================
+            */
+            int iSrcX = static_cast<int>(srcfx + 1.0e-10) - poWK->nSrcXOff;
+            int iSrcY = static_cast<int>(srcfy + 1.0e-10) - poWK->nSrcYOff;
+            if (iSrcX == nSrcXSize) iSrcX--;
+            if (iSrcY == nSrcYSize) iSrcY--;
+            GPtrDiff_t iSrcOffset = iSrcX + static_cast<GPtrDiff_t>(iSrcY) * nSrcXSize;
 
             /* ====================================================================
              */
@@ -5969,18 +5910,18 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
                 {
                     if (eResample == GRA_Bilinear)
                         GWKBilinearResampleNoMasks4SampleT(
-                            poWK, iBand, padfX[iDstX] - poWK->nSrcXOff,
-                            padfY[iDstX] - poWK->nSrcYOff, &value);
-                    else
+                            poWK, iBand, srcfx - poWK->nSrcXOff,
+                            srcfy - poWK->nSrcYOff, &value);
+                    else 
                         GWKCubicResampleNoMasks4SampleT(
-                            poWK, iBand, padfX[iDstX] - poWK->nSrcXOff,
-                            padfY[iDstX] - poWK->nSrcYOff, &value);
+                            poWK, iBand, srcfx - poWK->nSrcXOff,
+                            srcfy - poWK->nSrcYOff, &value);
                 }
                 else
                 {
                     GWKResampleNoMasksT(
-                        poWK, iBand, padfX[iDstX] - poWK->nSrcXOff,
-                        padfY[iDstX] - poWK->nSrcYOff, &value, padfWeight);
+                        poWK, iBand, srcfx - poWK->nSrcXOff,
+                        srcfy - poWK->nSrcYOff, &value, padfWeight);
                 }
 
                 if (poWK->bApplyVerticalShift)
