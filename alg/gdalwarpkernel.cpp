@@ -5634,36 +5634,48 @@ void loadArrayFromFile(unsigned char* array, int rows, int cols, const std::stri
     std::cout << "Array loaded from file: " << filename << std::endl;
 }
 
+typedef struct
+{
+
+    GDALTransformerInfo sTI;
+
+    double adfSrcGeoTransform[6];
+    double adfSrcInvGeoTransform[6];
+
+    void *pSrcTransformArg;
+    GDALTransformerFunc pSrcTransformer;
+
+    void *pReprojectArg;
+    GDALTransformerFunc pReproject;
+
+    double adfDstGeoTransform[6];
+    double adfDstInvGeoTransform[6];
+
+    void *pDstTransformArg;
+    GDALTransformerFunc pDstTransformer;
+
+    // Memorize the value of the CHECK_WITH_INVERT_PROJ at the time we
+    // instantiated the object, to be able to decide if
+    // GDALRefreshGenImgProjTransformer() must do something or not.
+    bool bCheckWithInvertPROJ;
+
+} GDALGenImgProjTransformInfo;
+
+typedef struct
+{
+    GDALTransformerInfo sTI;
+
+    GDALTransformerFunc pfnBaseTransformer;
+    void *pBaseCBData;
+    double dfMaxErrorForward;
+    double dfMaxErrorReverse;
+
+    int bOwnSubtransformer;
+} ApproxTransformInfo;
+
+
+
 /************************************************************************/
-
-void saveArrayToFile(unsigned char* array, int rows, int cols, const std::string& filename) {
-    std::ofstream file(filename, std::ios::binary);
-
-    if (!file) {
-        std::cerr << "Failed to open file for writing." << std::endl;
-        return;
-    }
-
-    file.write(reinterpret_cast<const char*>(array), sizeof(unsigned char) * rows * cols);
-    file.close();
-
-    std::cout << "Array saved to file: " << filename << std::endl;
-}
-
-void loadArrayFromFile(unsigned char* array, int rows, int cols, const std::string& filename) {
-    std::ifstream file(filename, std::ios::binary);
-
-    if (!file) {
-        std::cerr << "Failed to open file for reading." << std::endl;
-        return;
-    }
-
-    file.read(reinterpret_cast<char*>(array), sizeof(unsigned char) * rows * cols);
-    file.close();
-
-    std::cout << "Array loaded from file: " << filename << std::endl;
-}
-
 template <class T, GDALResampleAlg eResample, int bUse4SamplesFormula>
 static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
 
@@ -5704,7 +5716,6 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
         poWK->papszWarpOptions, "SRC_COORD_PRECISION", "0"));
     const double dfErrorThreshold = CPLAtof(
         CSLFetchNameValueDef(poWK->papszWarpOptions, "ERROR_THRESHOLD", "0"));
-
     // Precompute values.
     for (int iDstX = 0; iDstX < nDstXSize; iDstX++)
         padfX[nDstXSize + iDstX] = iDstX + 0.5 + poWK->nDstXOff;
@@ -5723,7 +5734,6 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
         const double dfY = iDstY + 0.5 + poWK->nDstYOff;
         for (int iDstX = 0; iDstX < nDstXSize; iDstX++)
             padfY[iDstX] = dfY;
-        memset(padfZ, 0, sizeof(double) * nDstXSize);
 
         /* --------------------------------------------------------------------
          */
@@ -5731,11 +5741,58 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
         /*      to source pixel/line coordinates. */
         /* --------------------------------------------------------------------
          */
-        poWK->pfnTransformer(psJob->pTransformerArg, TRUE, nDstXSize, padfX,
-                             padfY, padfZ, pabSuccess);
+        memset(padfZ, 0, sizeof(double) * nDstXSize);
+        //poWK->pfnTransformer(psJob->pTransformerArg, TRUE, nDstXSize, padfX_2,
+        //                     padfY_2, padfZ_2, pabSuccess_2);
+        
+        ApproxTransformInfo *psATInfo = static_cast<ApproxTransformInfo *>(psJob->pTransformerArg);
+
+        GDALGenImgProjTransformInfo *psInfo =
+        static_cast<GDALGenImgProjTransformInfo *>(psATInfo->pBaseCBData);
+        double* padfGeoTransform = psInfo->adfDstGeoTransform;
+        //printf("padfGeoTransform: %f %f %f %f %f %f\n", padfGeoTransform[0], padfGeoTransform[1], padfGeoTransform[2], padfGeoTransform[3], padfGeoTransform[4], padfGeoTransform[5]); 
+        padfGeoTransform = psInfo->adfSrcInvGeoTransform;
+        //printf("src padfGeoTransform: %f %f %f %f %f %f\n", padfGeoTransform[0], padfGeoTransform[1], padfGeoTransform[2], padfGeoTransform[3], padfGeoTransform[4], padfGeoTransform[5]); 
+
+        for (int i = 0; i < nDstXSize; i++)
+        {
+            //panSuccess[i] = (padfX[i] != HUGE_VAL && padfY[i] != HUGE_VAL);
+            pabSuccess[i] = 1; 
+            padfGeoTransform = psInfo->adfDstGeoTransform;
+            double dfNewX = padfGeoTransform[0] +
+                                  padfX[i] * padfGeoTransform[1] +
+                                  padfY[i] * padfGeoTransform[2];
+            double dfNewY = padfGeoTransform[3] +
+                                  padfX[i] * padfGeoTransform[4] +
+                                  padfY[i] * padfGeoTransform[5];
+
+            padfX[i] = dfNewX;
+            padfY[i] = dfNewY;
+
+            padfGeoTransform = psInfo->adfSrcInvGeoTransform; 
+            dfNewX = padfGeoTransform[0] +
+                                  padfX[i] * padfGeoTransform[1] +
+                                  padfY[i] * padfGeoTransform[2];
+            dfNewY = padfGeoTransform[3] +
+                                  padfX[i] * padfGeoTransform[4] +
+                                  padfY[i] * padfGeoTransform[5];
+
+            padfX[i] = dfNewX;
+            padfY[i] = dfNewY;
+        }
+#if 0
+        for(int i = 0; i < nDstXSize; i++) {
+            if(padfX[i] != padfX_2[i] || padfY[i] != padfY_2[i]) {
+                printf("x_y: %d %d\n", i, iDstY);
+                printf("ori x_y: %f %f\n", padfX[i], padfY[i]);
+                printf("cur x_y: %f %f\n", padfX_2[i], padfY_2[i]);
+            }
+        }
+#endif 
+
         if (dfSrcCoordPrecision > 0.0)
         {
-            printf(" Something wrong!!!  contact jianwen yan for details!!!!\n");
+            printf(" [todo:jw] Something wrong!!!  contact jianwen yan for details!!!!\n");
             GWKRoundSourceCoordinates(
                 nDstXSize, padfX, padfY, padfZ, pabSuccess, dfSrcCoordPrecision,
                 dfErrorThreshold, poWK->pfnTransformer, psJob->pTransformerArg,
@@ -5749,6 +5806,9 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
          */
         //printf("nSrcXSize = %d nSrcYSize = %d SrcXOFF = %d SrcYOFF = %d\n", nSrcXSize, nSrcYSize, poWK->nSrcXOff,poWK->nSrcYOff);
         //printf("nDstXSize = %d nDstYSize = %d DstXOFF = %d DstYOFF = %d\n", nDstXSize, poWK->nDstYSize, poWK->nDstXOff,poWK->nDstYOff);
+        
+        /* yjw!! check  dst_y_s, dst_y_e, dst_x_s, dst_x_e,
+        */
         for (int iDstX = 0; iDstX < nDstXSize; iDstX++)
         {
             GPtrDiff_t iSrcOffset = 0;
@@ -5788,41 +5848,6 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
                 {
                     GWKResampleNoMasksT(
                         poWK, iBand, padfX[iDstX] - poWK->nSrcXOff,
-#if 1
-    std::string f1 = "/root/gdal-compile/ori_c1.dat";
-    std::string f2 = "/root/gdal-compile/ori_c2.dat";
-    std::string f3 = "/root/gdal-compile/ori_c3.dat";
-    std::string f1c = "/root/gdal-compile/cur_c1.dat";
-    std::string f2c = "/root/gdal-compile/cur_c2.dat";
-    std::string f3c = "/root/gdal-compile/cur_c3.dat";
-    saveArrayToFile(poWK->papabyDstImage[0], poWK->nDstYSize, poWK->nDstXSize, f1c);
-    saveArrayToFile(poWK->papabyDstImage[1], poWK->nDstYSize, poWK->nDstXSize, f2c);
-    saveArrayToFile(poWK->papabyDstImage[2], poWK->nDstYSize, poWK->nDstXSize, f3c);
-
-    unsigned char* c1 = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
-    unsigned char* c2 = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
-    unsigned char* c3 = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
-
-    unsigned char* c1c = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
-    unsigned char* c2c = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
-    unsigned char* c3c = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
-
-    std::cout << poWK->nDstYSize << poWK->nDstXSize << std::endl;
-    loadArrayFromFile(c1, poWK->nDstYSize, poWK->nDstXSize, f1);
-    loadArrayFromFile(c2, poWK->nDstYSize, poWK->nDstXSize, f2);
-    loadArrayFromFile(c3, poWK->nDstYSize, poWK->nDstXSize, f3);
-
-    loadArrayFromFile(c1c, poWK->nDstYSize, poWK->nDstXSize, f1c);
-    loadArrayFromFile(c2c, poWK->nDstYSize, poWK->nDstXSize, f2c);
-    loadArrayFromFile(c3c, poWK->nDstYSize, poWK->nDstXSize, f3c);
-
-    for(int i = 0; i < poWK->nDstYSize * poWK->nDstXSize; ++i) {
-        if(c1[i] != c1c[i] || c2[i] != c2c[i] || c3[i] != c3c[i]) {
-            printf(" i = %d result differ!!\n", i);
-        }
-    }
-#endif
-
                         padfY[iDstX] - poWK->nSrcYOff, &value, padfWeight);
                 }
 
@@ -5853,7 +5878,7 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
         if (psJob->pfnProgress && psJob->pfnProgress(psJob))
             break;
     }
-#if 0
+#if 1
     std::string f1 = "/root/gdal-compile/ori_c1.dat";
     std::string f2 = "/root/gdal-compile/ori_c2.dat";
     std::string f3 = "/root/gdal-compile/ori_c3.dat";
@@ -5883,7 +5908,7 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
 
     for(int i = 0; i < poWK->nDstYSize * poWK->nDstXSize; ++i) {
         if(c1[i] != c1c[i] || c2[i] != c2c[i] || c3[i] != c3c[i]) {
-            printf(" i = %d result differ!!\n", i);
+            printf(" x = %d, y = %d, ori: %hhu %hhu %hhu cur: %hhu %hhu %hhu\n!!\n", i % 5600, i / 5600, c1[i], c2[i], c3[i], c1c[i], c2c[i], c3c[i]);
         }
     }
 #endif
