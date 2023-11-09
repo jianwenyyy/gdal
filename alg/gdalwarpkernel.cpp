@@ -5675,6 +5675,104 @@ typedef struct
 
 
 
+CPL_INLINE void dst2src_trans_simple(double* dst_trans, double* src_trans, double dst_x,double dst_y, double& src_x, double& src_y) {
+    double dfNewX = dst_trans[0] + dst_x * dst_trans[1] + dst_y * dst_trans[2];
+    double dfNewY = dst_trans[3] + dst_x * dst_trans[4] + dst_y * dst_trans[5];
+    src_x = src_trans[0] + dfNewX * src_trans[1] + dfNewY * src_trans[2];
+    src_y = src_trans[3] + dfNewX * src_trans[4] + dfNewY * src_trans[5];
+}
+
+static CPL_INLINE bool
+gwkcheck_simple(GWKJobStruct *psJob, int _iDstX, int _iDstY, double& _padfX, double& _padfY, int _nSrcXSize, int _nSrcYSize, double* dst_trans, double* src_trans)
+{
+    const GDALWarpKernel *_poWK = psJob->poWK;
+    for (int iTry = 0; iTry < 2; ++iTry)
+    {
+        if (iTry == 1)
+        {
+            // If the source coordinate is slightly outside of the source raster
+            // retry to transform it alone, so that the exact coordinate
+            // transformer is used.
+            _padfX = _iDstX + 0.5 + _poWK->nDstXOff;
+            _padfY = _iDstY + 0.5 + _poWK->nDstYOff;
+            dst2src_trans_simple(dst_trans, src_trans, _padfX, _padfY, _padfX, _padfY);
+        }
+        //if (!_pabSuccess[_iDstX])
+        //    return false;
+
+        // If this happens this is likely the symptom of a bug somewhere.
+        if (CPLIsNan(_padfX) || CPLIsNan(_padfY))
+        {
+            static bool bNanCoordFound = false;
+            if (!bNanCoordFound)
+            {
+                CPLDebug("WARP",
+                         "GWKCheckAndComputeSrcOffsets(): "
+                         "NaN coordinate found on point %d.",
+                         _iDstX);
+                bNanCoordFound = true;
+            }
+            return false;
+        }
+
+        /* --------------------------------------------------------------------
+         */
+        /*      Figure out what pixel we want in our source raster, and skip */
+        /*      further processing if it is well off the source image. */
+        /* --------------------------------------------------------------------
+         */
+        /* We test against the value before casting to avoid the */
+        /* problem of asymmetric truncation effects around zero.  That is */
+        /* -0.5 will be 0 when cast to an int. */
+        if (_padfX < _poWK->nSrcXOff)
+        {
+            // If the source coordinate is slightly outside of the source raster
+            // retry to transform it alone, so that the exact coordinate
+            // transformer is used.
+            if (iTry == 0 && _padfX > _poWK->nSrcXOff - 1)
+                continue;
+            return false;
+        }
+
+        if (_padfY < _poWK->nSrcYOff)
+        {
+            // If the source coordinate is slightly outside of the source raster
+            // retry to transform it alone, so that the exact coordinate
+            // transformer is used.
+            if (iTry == 0 && _padfY > _poWK->nSrcYOff - 1)
+                continue;
+            return false;
+        }
+
+        // Check for potential overflow when casting from float to int, (if
+        // operating outside natural projection area, padfX/Y can be a very huge
+        // positive number before doing the actual conversion), as such cast is
+        // undefined behavior that can trigger exception with some compilers
+        // (see #6753)
+        if (_padfX + 1e-10 > _nSrcXSize + _poWK->nSrcXOff)
+        {
+            // If the source coordinate is slightly outside of the source raster
+            // retry to transform it alone, so that the exact coordinate
+            // transformer is used.
+            if (iTry == 0 && _padfX < _nSrcXSize + _poWK->nSrcXOff + 1)
+                continue;
+            return false;
+        }
+        if (_padfY + 1e-10 > _nSrcYSize + _poWK->nSrcYOff)
+        {
+            // If the source coordinate is slightly outside of the source raster
+            // retry to transform it alone, so that the exact coordinate
+            // transformer is used.
+            if (iTry == 0 && _padfY < _nSrcYSize + _poWK->nSrcYOff + 1)
+                continue;
+            return false;
+        }
+
+        break;
+    }
+    return true;
+}
+
 /************************************************************************/
 template <class T, GDALResampleAlg eResample, int bUse4SamplesFormula>
 static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
@@ -5716,10 +5814,38 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
         poWK->papszWarpOptions, "SRC_COORD_PRECISION", "0"));
     const double dfErrorThreshold = CPLAtof(
         CSLFetchNameValueDef(poWK->papszWarpOptions, "ERROR_THRESHOLD", "0"));
+    ApproxTransformInfo *psATInfo = static_cast<ApproxTransformInfo *>(psJob->pTransformerArg);
+    GDALGenImgProjTransformInfo *psInfo =
+    static_cast<GDALGenImgProjTransformInfo *>(psATInfo->pBaseCBData);
+    double* padfGeoTransform = psInfo->adfDstGeoTransform;
+    padfGeoTransform = psInfo->adfSrcInvGeoTransform;
+
     // Precompute values.
     for (int iDstX = 0; iDstX < nDstXSize; iDstX++)
         padfX[nDstXSize + iDstX] = iDstX + 0.5 + poWK->nDstXOff;
-
+    
+    // calculate reporjected dst area in src aoi
+    int dst_y_start = INT_MAX, dst_y_end = INT_MIN;
+    for(int dst_y = iYMin; dst_y < iYMax; ++dst_y) {
+        double src_x = 0., src_y = 0.;
+        int dst_x = 0;
+        dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dst_x + 0.5 + poWK->nDstXOff, dst_y + 0.5 + poWK->nDstYOff, src_x, src_y);
+        if (gwkcheck_simple(psJob, dst_x, dst_y, src_x, src_y, nSrcXSize, nSrcYSize, psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform)){
+            dst_y_start = dst_y <= dst_y_start? dst_y: dst_y_start;
+            dst_y_end = dst_y >= dst_y_end ? dst_y : dst_y_end;
+        }
+    }
+    int dst_x_start = INT_MAX, dst_x_end = INT_MIN;
+    for(int dst_x = 0; dst_x < nDstXSize; ++dst_x) {
+        double src_x = 0., src_y = 0.;
+        int dst_y = dst_y_start;
+        dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dst_x + 0.5 + poWK->nDstXOff, dst_y + 0.5 + poWK->nDstYOff, src_x, src_y);
+        if (gwkcheck_simple(psJob, dst_x, dst_y, src_x, src_y, nSrcXSize, nSrcYSize, psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform)){
+            dst_x_start = dst_x <= dst_x_start? dst_x: dst_x_start;
+            dst_x_end = dst_x >= dst_x_end ? dst_x : dst_x_end;
+        }
+    } 
+    int x_s = INT_MAX, y_s = INT_MAX, x_e = INT_MIN, y_e = INT_MIN;
     /* ==================================================================== */
     /*      Loop over output lines.                                         */
     /* ==================================================================== */
@@ -5745,6 +5871,17 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
         //poWK->pfnTransformer(psJob->pTransformerArg, TRUE, nDstXSize, padfX_2,
         //                     padfY_2, padfZ_2, pabSuccess_2);
         
+        
+        ApproxTransformInfo *psATInfo = static_cast<ApproxTransformInfo *>(psJob->pTransformerArg);
+
+        GDALGenImgProjTransformInfo *psInfo =
+        static_cast<GDALGenImgProjTransformInfo *>(psATInfo->pBaseCBData);
+        double* padfGeoTransform = psInfo->adfDstGeoTransform;
+        //printf("padfGeoTransform: %f %f %f %f %f %f\n", padfGeoTransform[0], padfGeoTransform[1], padfGeoTransform[2], padfGeoTransform[3], padfGeoTransform[4], padfGeoTransform[5]); 
+        padfGeoTransform = psInfo->adfSrcInvGeoTransform;
+        //printf("src padfGeoTransform: %f %f %f %f %f %f\n", padfGeoTransform[0], padfGeoTransform[1], padfGeoTransform[2], padfGeoTransform[3], padfGeoTransform[4], padfGeoTransform[5]); 
+
+       
         ApproxTransformInfo *psATInfo = static_cast<ApproxTransformInfo *>(psJob->pTransformerArg);
 
         GDALGenImgProjTransformInfo *psInfo =
@@ -5780,15 +5917,6 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
             padfX[i] = dfNewX;
             padfY[i] = dfNewY;
         }
-#if 0
-        for(int i = 0; i < nDstXSize; i++) {
-            if(padfX[i] != padfX_2[i] || padfY[i] != padfY_2[i]) {
-                printf("x_y: %d %d\n", i, iDstY);
-                printf("ori x_y: %f %f\n", padfX[i], padfY[i]);
-                printf("cur x_y: %f %f\n", padfX_2[i], padfY_2[i]);
-            }
-        }
-#endif 
 
         if (dfSrcCoordPrecision > 0.0)
         {
@@ -5816,6 +5944,10 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
                                               padfX, padfY, nSrcXSize,
                                               nSrcYSize, iSrcOffset))
                 continue;
+            x_s = iDstX <= x_s? iDstX: x_s; 
+            y_s = iDstY <= y_s? iDstY: y_s;
+            x_e = iDstX >= x_e? iDstX: x_e; 
+            y_e = iDstY >= y_e? iDstY: y_e; 
 
             /* ====================================================================
              */
