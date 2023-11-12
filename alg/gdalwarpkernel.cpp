@@ -3320,9 +3320,8 @@ static bool GWKCubicResampleNoMasks4SampleT_2(const GDALWarpKernel *poWK,
     return true;
 }
 
-template <class T>
-static bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, const int iBand, const double* dfSrcX, const double* dfSrcY, double* p_dst, const GPtrDiff_t iSrcOffset)
-
+bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, const int iBand, const double* dfSrcX, 
+                                                const double* dfSrcY, const int* diSrcX, const int* diSrcY, unsigned char* p_dst)
 {
     // const
     /* cal x adfvalue
@@ -3355,10 +3354,10 @@ static bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, cons
     __m256d v_adfcoeffs_3 = _mm256_fmsub_pd(v_dfx_half2, v_dfx, v_dfx_half2);
     // (todo: yjw) use simd to shuffle
     double tmp[16], adfCoeffs[16];
-    _mm256_storeu_pd(adfCoeffs, v_adfcoeffs_0);
-    _mm256_storeu_pd(adfCoeffs + 4, v_adfcoeffs_1);
-    _mm256_storeu_pd(adfCoeffs + 8, v_adfcoeffs_2);
-    _mm256_storeu_pd(adfCoeffs + 12, v_adfcoeffs_3);
+    _mm256_storeu_pd(tmp, v_adfcoeffs_0);
+    _mm256_storeu_pd(tmp + 4, v_adfcoeffs_1);
+    _mm256_storeu_pd(tmp + 8, v_adfcoeffs_2);
+    _mm256_storeu_pd(tmp + 12, v_adfcoeffs_3);
     adfCoeffs[0] = tmp[0];
     adfCoeffs[1] = tmp[4];
     adfCoeffs[2] = tmp[8];
@@ -3389,24 +3388,31 @@ static bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, cons
     */
 
     // x0
-    GPtrDiff_t iOffset = iSrcOffset - poWK->nSrcXSize - 1;
-    unsigned char* p_src0 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iOffset;
     // load p1 p2 p3 p4
-    __m128i v_x0 = _mm_loadl_epi64((__m128i*)p_src0);
-    __m256i v_x0_a = _mm256_cvtepi8_epi32(v_x0);
-    __m128i v_x0_b1 = _mm256_extractf128_si256(v_x0_a, 0); // 1234
-    __m128i v_x0_b2 = _mm256_extractf128_si256(v_x0_a, 1); // 5678 
-    __m128i v_tmp = _mm_blend_epi32(v_x0_b1, v_x0_b2, 0b0001); 
-    __m128i v_x0_src_p2 = _mm_shuffle_epi32(v_tmp, _MM_SHUFFLE(0, 3, 2, 1)); // 2 3 4 5
-    v_tmp = _mm_shuffle_epi32(v_x0_src_p2, _MM_SHUFFLE(0, 3, 2, 1)); // 3 4 5 2
-    __m128i v_tmp2 = _mm_shuffle_epi32(v_x0_b2, _MM_SHUFFLE(1, 0 ,3, 2)); // 7 8 5 6
-    __m128i v_x0_src_p3 = _mm_blend_epi32(v_tmp, v_tmp2, 0b1100);  // 3 4 5 6
-    v_tmp = _mm_blend_epi32(v_x0_src_p3, v_tmp2, 0b0001); // 7 4 5 6
-    __m128i v_x0_src_p4 = _mm_shuffle_epi32(v_tmp, _MM_SHUFFLE(0, 3, 2, 1)); // 4 5 6 7 '
-    __m256d v_x0_src_p0_d = _mm256_cvtepi32_pd(v_x0_b1);   
-    __m256d v_x0_src_p1_d = _mm256_cvtepi32_pd(v_x0_src_p2);   
-    __m256d v_x0_src_p2_d = _mm256_cvtepi32_pd(v_x0_src_p3);   
-    __m256d v_x0_src_p3_d = _mm256_cvtepi32_pd(v_x0_src_p4);  
+    GPtrDiff_t iSrcOffset_p0 = static_cast<GPtrDiff_t>(diSrcX[0]) + static_cast<GPtrDiff_t>(diSrcY[0]) * poWK->nSrcXSize;
+    GPtrDiff_t iSrcOffset_p1 = static_cast<GPtrDiff_t>(diSrcX[1]) + static_cast<GPtrDiff_t>(diSrcY[1]) * poWK->nSrcXSize;
+    GPtrDiff_t iSrcOffset_p2 = static_cast<GPtrDiff_t>(diSrcX[2]) + static_cast<GPtrDiff_t>(diSrcY[2]) * poWK->nSrcXSize;
+    GPtrDiff_t iSrcOffset_p3 = static_cast<GPtrDiff_t>(diSrcX[3]) + static_cast<GPtrDiff_t>(diSrcY[3]) * poWK->nSrcXSize;
+    unsigned char* p_src_x0_p0 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p0 - poWK->nSrcXSize - 1;
+    unsigned char* p_src_x0_p1 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p1 - poWK->nSrcXSize - 1;
+    unsigned char* p_src_x0_p2 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p2 - poWK->nSrcXSize - 1;
+    unsigned char* p_src_x0_p3 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p3 - poWK->nSrcXSize - 1;
+    __m128i v_x0_p0 = _mm_loadl_epi64((__m128i*)p_src_x0_p0);
+    __m256i v_tmp = _mm256_cvtepi8_epi32(v_x0_p0);
+    __m128i v_x0_p0_i = _mm256_extractf128_si256(v_tmp, 0); // x0 p0 1 2 3 4
+    __m128i v_x0_p1 = _mm_loadl_epi64((__m128i*)p_src_x0_p1);
+    v_tmp = _mm256_cvtepi8_epi32(v_x0_p1);
+    __m128i v_x0_p1_i = _mm256_extractf128_si256(v_tmp, 0); // x0 p1 1 2 3 4    
+    __m128i v_x0_p2 = _mm_loadl_epi64((__m128i*)p_src_x0_p2);
+    v_tmp = _mm256_cvtepi8_epi32(v_x0_p2);
+    __m128i v_x0_p2_i = _mm256_extractf128_si256(v_tmp, 0); // x0 p2 1 2 3 4  
+    __m128i v_x0_p3 = _mm_loadl_epi64((__m128i*)p_src_x0_p3);
+    v_tmp = _mm256_cvtepi8_epi32(v_x0_p3);
+    __m128i v_x0_p3_i = _mm256_extractf128_si256(v_tmp, 0); // x0 p3 1 2 3 4
+    __m256d v_x0_src_p0_d = _mm256_cvtepi32_pd(v_x0_p0_i);   
+    __m256d v_x0_src_p1_d = _mm256_cvtepi32_pd(v_x0_p1_i);   
+    __m256d v_x0_src_p2_d = _mm256_cvtepi32_pd(v_x0_p2_i);   
+    __m256d v_x0_src_p3_d = _mm256_cvtepi32_pd(v_x0_p3_i);    
     // x * mul
     __m256d v_adf_p0 = _mm256_loadu_pd(adfCoeffs);
     __m256d v_adf_p1 = _mm256_loadu_pd(adfCoeffs + 4);
@@ -3426,24 +3432,27 @@ static bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, cons
     __m256d res_x0 = _mm256_insertf128_pd(_mm256_castpd128_pd256(res_x0_p0p1), res_x0_p2p3, 1);
     
     // x1
-    iOffset = iSrcOffset;
-    unsigned char* p_src1 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iOffset;
     // load p1 p2 p3 p4
-    __m128i v_x1 = _mm_loadl_epi64((__m128i*)p_src1);
-    __m256i v_x1_a = _mm256_cvtepi8_epi32(v_x1);
-    __m128i v_x1_b1 = _mm256_extractf128_si256(v_x1_a, 0); // 1234
-    __m128i v_x1_b2 = _mm256_extractf128_si256(v_x1_a, 1); // 5678 
-    __m128i v_x1_tmp = _mm_blend_epi32(v_x1_b1, v_x1_b2, 0b0001); 
-    __m128i v_x1_src_p2 = _mm_shuffle_epi32(v_x1_tmp, _MM_SHUFFLE(0, 3, 2, 1)); // 2 3 4 5
-    v_x1_tmp = _mm_shuffle_epi32(v_x1_src_p2, _MM_SHUFFLE(0, 3, 2, 1)); // 3 4 5 2
-    __m128i v_x1_tmp2 = _mm_shuffle_epi32(v_x1_b2, _MM_SHUFFLE(1, 0 ,3, 2)); // 7 8 5 6
-    __m128i v_x1_src_p3 = _mm_blend_epi32(v_x1_tmp, v_x1_tmp2, 0b1100);  // 3 4 5 6
-    v_x1_tmp = _mm_blend_epi32(v_x1_src_p3, v_x1_tmp2, 0b0001); // 7 4 5 6
-    __m128i v_x1_src_p4 = _mm_shuffle_epi32(v_x1_tmp, _MM_SHUFFLE(0, 3, 2, 1)); // 4 5 6 7 '
-    __m256d v_x1_src_p0_d = _mm256_cvtepi32_pd(v_x1_b1);   
-    __m256d v_x1_src_p1_d = _mm256_cvtepi32_pd(v_x1_src_p2);   
-    __m256d v_x1_src_p2_d = _mm256_cvtepi32_pd(v_x1_src_p3);   
-    __m256d v_x1_src_p3_d = _mm256_cvtepi32_pd(v_x1_src_p4);  
+    unsigned char* p_src_x1_p0 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p0;
+    unsigned char* p_src_x1_p1 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p1;
+    unsigned char* p_src_x1_p2 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p2;
+    unsigned char* p_src_x1_p3 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p3;
+    __m128i v_x1_p0 = _mm_loadl_epi64((__m128i*)p_src_x1_p0);
+    v_tmp = _mm256_cvtepi8_epi32(v_x1_p0);
+    __m128i v_x1_p0_i = _mm256_extractf128_si256(v_tmp, 0); // x1 p0 1 2 3 4
+    __m128i v_x1_p1 = _mm_loadl_epi64((__m128i*)p_src_x1_p1);
+    v_tmp = _mm256_cvtepi8_epi32(v_x1_p1);
+    __m128i v_x1_p1_i = _mm256_extractf128_si256(v_tmp, 0); // x1 p1 1 2 3 4    
+    __m128i v_x1_p2 = _mm_loadl_epi64((__m128i*)p_src_x1_p2);
+    v_tmp = _mm256_cvtepi8_epi32(v_x1_p2);
+    __m128i v_x1_p2_i = _mm256_extractf128_si256(v_tmp, 0); // x1 p2 1 2 3 4  
+    __m128i v_x1_p3 = _mm_loadl_epi64((__m128i*)p_src_x1_p3);
+    v_tmp = _mm256_cvtepi8_epi32(v_x1_p3);
+    __m128i v_x1_p3_i = _mm256_extractf128_si256(v_tmp, 0); // x1 p3 1 2 3 4
+    __m256d v_x1_src_p0_d = _mm256_cvtepi32_pd(v_x1_p0_i);   
+    __m256d v_x1_src_p1_d = _mm256_cvtepi32_pd(v_x1_p1_i);   
+    __m256d v_x1_src_p2_d = _mm256_cvtepi32_pd(v_x1_p2_i);   
+    __m256d v_x1_src_p3_d = _mm256_cvtepi32_pd(v_x1_p3_i); 
     // x * mul
     __m256d v_x1_src_conv_p0 = _mm256_mul_pd(v_x1_src_p0_d, v_adf_p0);
     __m256d v_x1_src_conv_p1 = _mm256_mul_pd(v_x1_src_p1_d, v_adf_p1);
@@ -3459,24 +3468,27 @@ static bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, cons
     __m256d res_x1 = _mm256_insertf128_pd(_mm256_castpd128_pd256(res_x1_p0p1), res_x1_p2p3, 1);
 
     // x2
-    iOffset = iSrcOffset + poWK->nSrcXSize - 1;
-    unsigned char* p_src2 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iOffset;
     // load p1 p2 p3 p4
-    __m128i v_x2 = _mm_loadl_epi64((__m128i*)p_src2);
-    __m256i v_x2_a = _mm256_cvtepi8_epi32(v_x2);
-    __m128i v_x2_b1 = _mm256_extractf128_si256(v_x2_a, 0); // 1234
-    __m128i v_x2_b2 = _mm256_extractf128_si256(v_x2_a, 1); // 5678 
-    __m128i v_x2_tmp = _mm_blend_epi32(v_x2_b1, v_x2_b2, 0b0001); 
-    __m128i v_x2_src_p2 = _mm_shuffle_epi32(v_x2_tmp, _MM_SHUFFLE(0, 3, 2, 1)); // 2 3 4 5
-    v_x2_tmp = _mm_shuffle_epi32(v_x2_src_p2, _MM_SHUFFLE(0, 3, 2, 1)); // 3 4 5 2
-    __m128i v_x2_tmp2 = _mm_shuffle_epi32(v_x2_b2, _MM_SHUFFLE(1, 0 ,3, 2)); // 7 8 5 6
-    __m128i v_x2_src_p3 = _mm_blend_epi32(v_x2_tmp, v_x2_tmp2, 0b1100);  // 3 4 5 6
-    v_x2_tmp = _mm_blend_epi32(v_x2_src_p3, v_x2_tmp2, 0b0001); // 7 4 5 6
-    __m128i v_x2_src_p4 = _mm_shuffle_epi32(v_x2_tmp, _MM_SHUFFLE(0, 3, 2, 1)); // 4 5 6 7 '
-    __m256d v_x2_src_p0_d = _mm256_cvtepi32_pd(v_x2_b1);   
-    __m256d v_x2_src_p1_d = _mm256_cvtepi32_pd(v_x2_src_p2);   
-    __m256d v_x2_src_p2_d = _mm256_cvtepi32_pd(v_x2_src_p3);   
-    __m256d v_x2_src_p3_d = _mm256_cvtepi32_pd(v_x2_src_p4);  
+    unsigned char* p_src_x2_p0 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p0 + poWK->nSrcXSize - 1;
+    unsigned char* p_src_x2_p1 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p1 + poWK->nSrcXSize - 1;
+    unsigned char* p_src_x2_p2 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p2 + poWK->nSrcXSize - 1;
+    unsigned char* p_src_x2_p3 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p3 + poWK->nSrcXSize - 1;
+    __m128i v_x2_p0 = _mm_loadl_epi64((__m128i*)p_src_x2_p0);
+    v_tmp = _mm256_cvtepi8_epi32(v_x2_p0);
+    __m128i v_x2_p0_i = _mm256_extractf128_si256(v_tmp, 0); // x2 p0 1 2 3 4
+    __m128i v_x2_p1 = _mm_loadl_epi64((__m128i*)p_src_x2_p1);
+    v_tmp = _mm256_cvtepi8_epi32(v_x2_p1);
+    __m128i v_x2_p1_i = _mm256_extractf128_si256(v_tmp, 0); // x2 p1 1 2 3 4    
+    __m128i v_x2_p2 = _mm_loadl_epi64((__m128i*)p_src_x2_p2);
+    v_tmp = _mm256_cvtepi8_epi32(v_x2_p2);
+    __m128i v_x2_p2_i = _mm256_extractf128_si256(v_tmp, 0); // x2 p2 1 2 3 4  
+    __m128i v_x2_p3 = _mm_loadl_epi64((__m128i*)p_src_x2_p3);
+    v_tmp = _mm256_cvtepi8_epi32(v_x2_p3);
+    __m128i v_x2_p3_i = _mm256_extractf128_si256(v_tmp, 0); // x2 p3 1 2 3 4
+    __m256d v_x2_src_p0_d = _mm256_cvtepi32_pd(v_x2_p0_i);   
+    __m256d v_x2_src_p1_d = _mm256_cvtepi32_pd(v_x2_p1_i);   
+    __m256d v_x2_src_p2_d = _mm256_cvtepi32_pd(v_x2_p2_i);   
+    __m256d v_x2_src_p3_d = _mm256_cvtepi32_pd(v_x2_p3_i);
     // x * mul
     __m256d v_x2_src_conv_p0 = _mm256_mul_pd(v_x2_src_p0_d, v_adf_p0);
     __m256d v_x2_src_conv_p1 = _mm256_mul_pd(v_x2_src_p1_d, v_adf_p1);
@@ -3492,24 +3504,27 @@ static bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, cons
     __m256d res_x2 = _mm256_insertf128_pd(_mm256_castpd128_pd256(res_x2_p0p1), res_x2_p2p3, 1);
 
     // x3
-    iOffset = iSrcOffset + 2 * poWK->nSrcXSize - 1;
-    unsigned char* p_src3 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iOffset;
     // load p1 p2 p3 p4
-    __m128i v_x3 = _mm_loadl_epi64((__m128i*)p_src3);
-    __m256i v_x3_a = _mm256_cvtepi8_epi32(v_x3);
-    __m128i v_x3_b1 = _mm256_extractf128_si256(v_x3_a, 0); // 1234
-    __m128i v_x3_b2 = _mm256_extractf128_si256(v_x3_a, 1); // 5678 
-    __m128i v_x3_tmp = _mm_blend_epi32(v_x3_b1, v_x3_b2, 0b0001); 
-    __m128i v_x3_src_p2 = _mm_shuffle_epi32(v_x3_tmp, _MM_SHUFFLE(0, 3, 2, 1)); // 2 3 4 5
-    v_x3_tmp = _mm_shuffle_epi32(v_x3_src_p2, _MM_SHUFFLE(0, 3, 2, 1)); // 3 4 5 2
-    __m128i v_x3_tmp2 = _mm_shuffle_epi32(v_x3_b2, _MM_SHUFFLE(1, 0 ,3, 2)); // 7 8 5 6
-    __m128i v_x3_src_p3 = _mm_blend_epi32(v_x3_tmp, v_x3_tmp2, 0b1100);  // 3 4 5 6
-    v_x3_tmp = _mm_blend_epi32(v_x3_src_p3, v_x3_tmp2, 0b0001); // 7 4 5 6
-    __m128i v_x3_src_p4 = _mm_shuffle_epi32(v_x3_tmp, _MM_SHUFFLE(0, 3, 2, 1)); // 4 5 6 7 '
-    __m256d v_x3_src_p0_d = _mm256_cvtepi32_pd(v_x3_b1);   
-    __m256d v_x3_src_p1_d = _mm256_cvtepi32_pd(v_x3_src_p2);   
-    __m256d v_x3_src_p2_d = _mm256_cvtepi32_pd(v_x3_src_p3);   
-    __m256d v_x3_src_p3_d = _mm256_cvtepi32_pd(v_x3_src_p4);  
+    unsigned char* p_src_x3_p0 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p0 + 2 * poWK->nSrcXSize - 1;
+    unsigned char* p_src_x3_p1 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p1 + 2 * poWK->nSrcXSize - 1;
+    unsigned char* p_src_x3_p2 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p2 + 2 * poWK->nSrcXSize - 1;
+    unsigned char* p_src_x3_p3 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p3 + 2 * poWK->nSrcXSize - 1;
+    __m128i v_x3_p0 = _mm_loadl_epi64((__m128i*)p_src_x3_p0);
+    v_tmp = _mm256_cvtepi8_epi32(v_x3_p0);
+    __m128i v_x3_p0_i = _mm256_extractf128_si256(v_tmp, 0); // x3 p0 1 2 3 4
+    __m128i v_x3_p1 = _mm_loadl_epi64((__m128i*)p_src_x3_p1);
+    v_tmp = _mm256_cvtepi8_epi32(v_x3_p1);
+    __m128i v_x3_p1_i = _mm256_extractf128_si256(v_tmp, 0); // x3 p1 1 2 3 4    
+    __m128i v_x3_p2 = _mm_loadl_epi64((__m128i*)p_src_x3_p2);
+    v_tmp = _mm256_cvtepi8_epi32(v_x3_p2);
+    __m128i v_x3_p2_i = _mm256_extractf128_si256(v_tmp, 0); // x3 p2 1 2 3 4  
+    __m128i v_x3_p3 = _mm_loadl_epi64((__m128i*)p_src_x3_p3);
+    v_tmp = _mm256_cvtepi8_epi32(v_x3_p3);
+    __m128i v_x3_p3_i = _mm256_extractf128_si256(v_tmp, 0); // x3 p3 1 2 3 4
+    __m256d v_x3_src_p0_d = _mm256_cvtepi32_pd(v_x3_p0_i);   
+    __m256d v_x3_src_p1_d = _mm256_cvtepi32_pd(v_x3_p1_i);   
+    __m256d v_x3_src_p2_d = _mm256_cvtepi32_pd(v_x3_p2_i);   
+    __m256d v_x3_src_p3_d = _mm256_cvtepi32_pd(v_x3_p3_i);  
     // x * mul
     __m256d v_x3_src_conv_p0 = _mm256_mul_pd(v_x3_src_p0_d, v_adf_p0);
     __m256d v_x3_src_conv_p1 = _mm256_mul_pd(v_x3_src_p1_d, v_adf_p1);
@@ -3548,7 +3563,12 @@ static bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, cons
     __m256d v_res_y4 = _mm256_mul_pd(v_dfy3, v_tmp_y); 
     __m256d v_res_y = _mm256_add_pd(res_x1, _mm256_mul_pd(v_const_y, _mm256_add_pd(v_res_y2, _mm256_add_pd(v_res_y3, v_res_y4))));
     // store
-    _mm256_storeu_pd(p_dst, v_res_y);
+    double p_dst_d[4];
+    _mm256_storeu_pd(p_dst_d, v_res_y);
+    p_dst[0] = static_cast<unsigned char>(p_dst_d[0]);
+    p_dst[1] = static_cast<unsigned char>(p_dst_d[1]);
+    p_dst[2] = static_cast<unsigned char>(p_dst_d[2]);
+    p_dst[3] = static_cast<unsigned char>(p_dst_d[3]);
     return true;
 }
 
@@ -6217,9 +6237,42 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
     /* ==================================================================== */
     printf("xse: %d %d yse: %d %d\n", dst_x_start, dst_x_end, dst_y_start, dst_y_end);
     printf("border xse: %d %d yse: %d %d\n", dst_x_boder_left + 1, dst_x_boder_right - 1, dst_y_boder_up + 1, dst_y_boder_down - 1);
+    double dfsrcx[4], dfsrcy[4];
+    int disrcx[4], disrcy[4];
     for (int iDstY = dst_y_boder_up + 1; iDstY <= dst_y_boder_down - 1; iDstY++)
     {
-        for (int iDstX = dst_x_boder_left + 1; iDstX <= dst_x_boder_right - 1; iDstX++)
+        int iDstX = dst_x_boder_left + 1; 
+        for (; iDstX <= dst_x_boder_right - 4; iDstX+= 4)
+        {
+            for(int i = 0; i < 4; i++) {
+                double srcfx = 0., srcfy = 0.;
+                dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, iDstX + i + 0.5 + poWK->nDstXOff, iDstY + 0.5 + poWK->nDstYOff, srcfx, srcfy);
+                int srcix = static_cast<int>(srcfx + 1.0e-10) - poWK->nSrcXOff;
+                int srciy = static_cast<int>(srcfy + 1.0e-10) - poWK->nSrcXOff;
+                if (srcix == nSrcXSize) srcix--;
+                if (srciy == nSrcYSize) srciy--;
+                if (dfSrcCoordPrecision > 0.0)
+                {
+                    printf(" [todo:jw] Something wrong!!!  contact jianwen yan for details!!!!\n");
+                    /*GWKRoundSourceCoordinates(
+                    nDstXSize, padfX, padfY, padfZ, pabSuccess, dfSrcCoordPrecision,
+                    dfErrorThreshold, poWK->pfnTransformer, psJob->pTransformerArg,
+                    0.5 + poWK->nDstXOff, iDstY + 0.5 + poWK->nDstYOff);*/
+                }
+                dfsrcx[i] = srcfx;
+                dfsrcy[i] = srcfy;
+                disrcx[i] = srcix;
+                disrcy[i] = srciy;
+            }
+            const GPtrDiff_t iDstOffset =
+                iDstX + static_cast<GPtrDiff_t>(iDstY) * nDstXSize;
+            for (int iBand = 0; iBand < poWK->nBands; iBand++)
+            {
+                unsigned char* p_dst = reinterpret_cast<unsigned char*>(poWK->papabyDstImage[iBand]) + iDstOffset;
+                GWKCubicResampleNoMasks4SampleTSimd(poWK, iBand, dfsrcx, dfsrcy, disrcx, disrcy, p_dst);
+            }
+        }
+        for (; iDstX <= dst_x_boder_right - 1; iDstX++)
         {
             double dstfx= iDstX + 0.5 + poWK->nDstXOff, dstfy = iDstY + 0.5 + poWK->nDstYOff;
             double srcfx = 0., srcfy = 0.;
@@ -6320,7 +6373,7 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
         if (psJob->pfnProgress && psJob->pfnProgress(psJob))
             break;
     }
-#if 1
+#if 0
     std::string f1 = "/root/gdal-compile/ori_c1.dat";
     std::string f2 = "/root/gdal-compile/ori_c2.dat";
     std::string f3 = "/root/gdal-compile/ori_c3.dat";

@@ -1,4 +1,8 @@
 # CMake4GDAL project is distributed under MIT license. See accompanying file LICENSE.txt.
+ADD_COMPILE_OPTIONS(-msse4.2)
+ADD_COMPILE_OPTIONS(-mavx)
+ADD_COMPILE_OPTIONS(-mavx2)
+ADD_COMPILE_OPTIONS(-mfma)
 
 add_library(
   alg OBJECT
