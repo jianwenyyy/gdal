@@ -86,6 +86,11 @@
 
 #endif
 
+#ifdef HAVE_AVX_AT_COMPILE_TIME
+#include <immintrin.h>
+#endif
+
+
 CPL_CVSID("$Id$")
 
 constexpr double BAND_DENSITY_THRESHOLD = 0.0000000001;
@@ -3277,6 +3282,276 @@ static bool GWKCubicResampleNoMasks4SampleT(const GDALWarpKernel *poWK,
     return true;
 }
 
+template <class T>
+static bool GWKCubicResampleNoMasks4SampleT_2(const GDALWarpKernel *poWK,
+                                            int iBand, double dfSrcX,
+                                            double dfSrcY, T *pValue)
+
+{
+    const int iSrcX = static_cast<int>(dfSrcX - 0.5);
+    const int iSrcY = static_cast<int>(dfSrcY - 0.5);
+    const GPtrDiff_t iSrcOffset =
+        iSrcX + static_cast<GPtrDiff_t>(iSrcY) * poWK->nSrcXSize;
+    const double dfDeltaX = dfSrcX - 0.5 - iSrcX;
+    const double dfDeltaY = dfSrcY - 0.5 - iSrcY;
+    const double dfDeltaY2 = dfDeltaY * dfDeltaY;
+    const double dfDeltaY3 = dfDeltaY2 * dfDeltaY;
+
+    double adfCoeffs[4] = {};
+    GWKCubicComputeWeights(dfDeltaX, adfCoeffs);
+
+    double adfValue[4] = {};
+
+    for (GPtrDiff_t i = -1; i < 3; i++)
+    {
+        const GPtrDiff_t iOffset = iSrcOffset + i * poWK->nSrcXSize - 1;
+
+        adfValue[i + 1] = CONVOL4(
+            adfCoeffs,
+            reinterpret_cast<T *>(poWK->papabySrcImage[iBand]) + iOffset);
+    }
+
+    const double dfValue =
+        CubicConvolution(dfDeltaY, dfDeltaY2, dfDeltaY3, adfValue[0],
+                         adfValue[1], adfValue[2], adfValue[3]);
+
+    *pValue = GWKClampValueT<T>(dfValue);
+
+    return true;
+}
+
+template <class T>
+static bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, const int iBand, const double* dfSrcX, const double* dfSrcY, double* p_dst, const GPtrDiff_t iSrcOffset)
+
+{
+    // const
+    /* cal x adfvalue
+    const int iSrcX = static_cast<int>(dfSrcX - 0.5);
+    const double dfDeltaX = dfSrcX - 0.5 - iSrcX;
+    double adfCoeffs[4] = {};
+    GWKCubicComputeWeights(dfDeltaX, adfCoeffs);
+        const double dfX = dfX_;                                               \
+        const double dfHalfX = 0.5 * dfX;                                      \
+        const double dfThreeX = 3.0 * dfX;                                     \
+        const double dfHalfX2 = dfHalfX * dfX;                                 \
+                                                                               \
+        adfCoeffs[0] = dfHalfX * (-1 + dfX * (2 - dfX));                       \
+        adfCoeffs[1] = 1 + dfHalfX2 * (-5 + dfThreeX);                         \
+        adfCoeffs[2] = dfHalfX * (1 + dfX * (4 - dfThreeX));                   \
+        adfCoeffs[3] = dfHalfX2 * dfX - dfHalfX2; 
+    */
+    __m256d v_fsrcx = _mm256_loadu_pd(dfSrcX);
+    __m256d v_const = _mm256_set1_pd(0.5);
+    __m256d v_fsrcx_corner = _mm256_sub_pd(v_fsrcx, v_const); 
+    __m128i v_isrcx = _mm256_cvttpd_epi32(v_fsrcx_corner);
+    __m256d v_dfx = _mm256_sub_pd(v_fsrcx_corner, _mm256_cvtepi32_pd(v_isrcx));
+    __m256d v_dfx_half = _mm256_mul_pd(v_dfx, v_const);
+    __m256d v_dfx_three = _mm256_mul_pd(v_dfx, _mm256_set1_pd(3.0)); 
+    __m256d v_dfx_half2 = _mm256_mul_pd(v_dfx, v_dfx_half);
+    v_const = _mm256_set1_pd(1); 
+    __m256d v_adfcoeffs_0 = _mm256_mul_pd(v_dfx_half, _mm256_fmsub_pd(v_dfx, _mm256_sub_pd(_mm256_set1_pd(2.0), v_dfx), v_const));
+    __m256d v_adfcoeffs_1 = _mm256_fmadd_pd(v_dfx_half2, _mm256_sub_pd(v_dfx_three, _mm256_set1_pd(5.0)), v_const);
+    __m256d v_adfcoeffs_2 = _mm256_mul_pd(v_dfx_half, _mm256_fmadd_pd(v_dfx, _mm256_sub_pd(_mm256_set1_pd(4.0), v_dfx_three), v_const));
+    __m256d v_adfcoeffs_3 = _mm256_fmsub_pd(v_dfx_half2, v_dfx, v_dfx_half2);
+    // (todo: yjw) use simd to shuffle
+    double tmp[16], adfCoeffs[16];
+    _mm256_storeu_pd(adfCoeffs, v_adfcoeffs_0);
+    _mm256_storeu_pd(adfCoeffs + 4, v_adfcoeffs_1);
+    _mm256_storeu_pd(adfCoeffs + 8, v_adfcoeffs_2);
+    _mm256_storeu_pd(adfCoeffs + 12, v_adfcoeffs_3);
+    adfCoeffs[0] = tmp[0];
+    adfCoeffs[1] = tmp[4];
+    adfCoeffs[2] = tmp[8];
+    adfCoeffs[3] = tmp[12];
+    adfCoeffs[4] = tmp[1];
+    adfCoeffs[5] = tmp[5];
+    adfCoeffs[6] = tmp[9];
+    adfCoeffs[7] = tmp[13];
+    adfCoeffs[8] = tmp[2];
+    adfCoeffs[9] = tmp[6];
+    adfCoeffs[10] = tmp[10];
+    adfCoeffs[11] = tmp[14];
+    adfCoeffs[12] = tmp[3];
+    adfCoeffs[13] = tmp[7];
+    adfCoeffs[14] = tmp[11];
+    adfCoeffs[15] = tmp[15];    
+    /* cal x mul sum
+    for (GPtrDiff_t i = -1; i < 3; i++)
+    {
+        const GPtrDiff_t iOffset = iSrcOffset + i * poWK->nSrcXSize - 1;
+
+        adfValue[i + 1] = CONVOL4(
+            adfCoeffs,
+            reinterpret_cast<T *>(poWK->papabySrcImage[iBand]) + iOffset);
+        ((v1)[0] * (v2)[0] + (v1)[1] * (v2)[1] + (v1)[2] * (v2)[2] +               \
+     (v1)[3] * (v2)[3])
+    }
+    */
+
+    // x0
+    GPtrDiff_t iOffset = iSrcOffset - poWK->nSrcXSize - 1;
+    unsigned char* p_src0 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iOffset;
+    // load p1 p2 p3 p4
+    __m128i v_x0 = _mm_loadl_epi64((__m128i*)p_src0);
+    __m256i v_x0_a = _mm256_cvtepi8_epi32(v_x0);
+    __m128i v_x0_b1 = _mm256_extractf128_si256(v_x0_a, 0); // 1234
+    __m128i v_x0_b2 = _mm256_extractf128_si256(v_x0_a, 1); // 5678 
+    __m128i v_tmp = _mm_blend_epi32(v_x0_b1, v_x0_b2, 0b0001); 
+    __m128i v_x0_src_p2 = _mm_shuffle_epi32(v_tmp, _MM_SHUFFLE(0, 3, 2, 1)); // 2 3 4 5
+    v_tmp = _mm_shuffle_epi32(v_x0_src_p2, _MM_SHUFFLE(0, 3, 2, 1)); // 3 4 5 2
+    __m128i v_tmp2 = _mm_shuffle_epi32(v_x0_b2, _MM_SHUFFLE(1, 0 ,3, 2)); // 7 8 5 6
+    __m128i v_x0_src_p3 = _mm_blend_epi32(v_tmp, v_tmp2, 0b1100);  // 3 4 5 6
+    v_tmp = _mm_blend_epi32(v_x0_src_p3, v_tmp2, 0b0001); // 7 4 5 6
+    __m128i v_x0_src_p4 = _mm_shuffle_epi32(v_tmp, _MM_SHUFFLE(0, 3, 2, 1)); // 4 5 6 7 '
+    __m256d v_x0_src_p0_d = _mm256_cvtepi32_pd(v_x0_b1);   
+    __m256d v_x0_src_p1_d = _mm256_cvtepi32_pd(v_x0_src_p2);   
+    __m256d v_x0_src_p2_d = _mm256_cvtepi32_pd(v_x0_src_p3);   
+    __m256d v_x0_src_p3_d = _mm256_cvtepi32_pd(v_x0_src_p4);  
+    // x * mul
+    __m256d v_adf_p0 = _mm256_loadu_pd(adfCoeffs);
+    __m256d v_adf_p1 = _mm256_loadu_pd(adfCoeffs + 4);
+    __m256d v_adf_p2 = _mm256_loadu_pd(adfCoeffs + 8);
+    __m256d v_adf_p3 = _mm256_loadu_pd(adfCoeffs + 12);
+    __m256d v_x0_src_conv_p0 = _mm256_mul_pd(v_x0_src_p0_d, v_adf_p0);
+    __m256d v_x0_src_conv_p1 = _mm256_mul_pd(v_x0_src_p1_d, v_adf_p1);
+    __m256d v_x0_src_conv_p2 = _mm256_mul_pd(v_x0_src_p2_d, v_adf_p2);
+    __m256d v_x0_src_conv_p3 = _mm256_mul_pd(v_x0_src_p3_d, v_adf_p3);
+    // hadd
+    __m256d sum_x0 = _mm256_hadd_pd(v_x0_src_conv_p0, v_x0_src_conv_p1); // x01+x02, x11 + x12, x03+x04, x13+x14
+    __m128d sum_high_x0 = _mm256_extractf128_pd(sum_x0, 1);
+    __m128d res_x0_p0p1 = _mm_add_pd(sum_high_x0, _mm256_castpd256_pd128(sum_x0)); // x01+x02+x03+x04, x11+x12+x13+x14;
+    sum_x0 = _mm256_hadd_pd(v_x0_src_conv_p2, v_x0_src_conv_p3); 
+    sum_high_x0 = _mm256_extractf128_pd(sum_x0, 1);
+    __m128d res_x0_p2p3 = _mm_add_pd(sum_high_x0, _mm256_castpd256_pd128(sum_x0)); // x21+x22+x23+x24, x31+x32+x33+x34;
+    __m256d res_x0 = _mm256_insertf128_pd(_mm256_castpd128_pd256(res_x0_p0p1), res_x0_p2p3, 1);
+    
+    // x1
+    iOffset = iSrcOffset;
+    unsigned char* p_src1 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iOffset;
+    // load p1 p2 p3 p4
+    __m128i v_x1 = _mm_loadl_epi64((__m128i*)p_src1);
+    __m256i v_x1_a = _mm256_cvtepi8_epi32(v_x1);
+    __m128i v_x1_b1 = _mm256_extractf128_si256(v_x1_a, 0); // 1234
+    __m128i v_x1_b2 = _mm256_extractf128_si256(v_x1_a, 1); // 5678 
+    __m128i v_x1_tmp = _mm_blend_epi32(v_x1_b1, v_x1_b2, 0b0001); 
+    __m128i v_x1_src_p2 = _mm_shuffle_epi32(v_x1_tmp, _MM_SHUFFLE(0, 3, 2, 1)); // 2 3 4 5
+    v_x1_tmp = _mm_shuffle_epi32(v_x1_src_p2, _MM_SHUFFLE(0, 3, 2, 1)); // 3 4 5 2
+    __m128i v_x1_tmp2 = _mm_shuffle_epi32(v_x1_b2, _MM_SHUFFLE(1, 0 ,3, 2)); // 7 8 5 6
+    __m128i v_x1_src_p3 = _mm_blend_epi32(v_x1_tmp, v_x1_tmp2, 0b1100);  // 3 4 5 6
+    v_x1_tmp = _mm_blend_epi32(v_x1_src_p3, v_x1_tmp2, 0b0001); // 7 4 5 6
+    __m128i v_x1_src_p4 = _mm_shuffle_epi32(v_x1_tmp, _MM_SHUFFLE(0, 3, 2, 1)); // 4 5 6 7 '
+    __m256d v_x1_src_p0_d = _mm256_cvtepi32_pd(v_x1_b1);   
+    __m256d v_x1_src_p1_d = _mm256_cvtepi32_pd(v_x1_src_p2);   
+    __m256d v_x1_src_p2_d = _mm256_cvtepi32_pd(v_x1_src_p3);   
+    __m256d v_x1_src_p3_d = _mm256_cvtepi32_pd(v_x1_src_p4);  
+    // x * mul
+    __m256d v_x1_src_conv_p0 = _mm256_mul_pd(v_x1_src_p0_d, v_adf_p0);
+    __m256d v_x1_src_conv_p1 = _mm256_mul_pd(v_x1_src_p1_d, v_adf_p1);
+    __m256d v_x1_src_conv_p2 = _mm256_mul_pd(v_x1_src_p2_d, v_adf_p2);
+    __m256d v_x1_src_conv_p3 = _mm256_mul_pd(v_x1_src_p3_d, v_adf_p3);
+    // hadd
+    __m256d sum_x1 = _mm256_hadd_pd(v_x1_src_conv_p0, v_x1_src_conv_p1); // x01+x02, x11 + x12, x03+x04, x13+x14
+    __m128d sum_high_x1 = _mm256_extractf128_pd(sum_x1, 1);
+    __m128d res_x1_p0p1 = _mm_add_pd(sum_high_x1, _mm256_castpd256_pd128(sum_x1)); // x01+x02+x03+x04, x11+x12+x13+x14;
+    sum_x1 = _mm256_hadd_pd(v_x1_src_conv_p2, v_x1_src_conv_p3); 
+    sum_high_x1 = _mm256_extractf128_pd(sum_x1, 1);
+    __m128d res_x1_p2p3 = _mm_add_pd(sum_high_x1, _mm256_castpd256_pd128(sum_x1)); // x21+x22+x23+x24, x31+x32+x33+x34;
+    __m256d res_x1 = _mm256_insertf128_pd(_mm256_castpd128_pd256(res_x1_p0p1), res_x1_p2p3, 1);
+
+    // x2
+    iOffset = iSrcOffset + poWK->nSrcXSize - 1;
+    unsigned char* p_src2 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iOffset;
+    // load p1 p2 p3 p4
+    __m128i v_x2 = _mm_loadl_epi64((__m128i*)p_src2);
+    __m256i v_x2_a = _mm256_cvtepi8_epi32(v_x2);
+    __m128i v_x2_b1 = _mm256_extractf128_si256(v_x2_a, 0); // 1234
+    __m128i v_x2_b2 = _mm256_extractf128_si256(v_x2_a, 1); // 5678 
+    __m128i v_x2_tmp = _mm_blend_epi32(v_x2_b1, v_x2_b2, 0b0001); 
+    __m128i v_x2_src_p2 = _mm_shuffle_epi32(v_x2_tmp, _MM_SHUFFLE(0, 3, 2, 1)); // 2 3 4 5
+    v_x2_tmp = _mm_shuffle_epi32(v_x2_src_p2, _MM_SHUFFLE(0, 3, 2, 1)); // 3 4 5 2
+    __m128i v_x2_tmp2 = _mm_shuffle_epi32(v_x2_b2, _MM_SHUFFLE(1, 0 ,3, 2)); // 7 8 5 6
+    __m128i v_x2_src_p3 = _mm_blend_epi32(v_x2_tmp, v_x2_tmp2, 0b1100);  // 3 4 5 6
+    v_x2_tmp = _mm_blend_epi32(v_x2_src_p3, v_x2_tmp2, 0b0001); // 7 4 5 6
+    __m128i v_x2_src_p4 = _mm_shuffle_epi32(v_x2_tmp, _MM_SHUFFLE(0, 3, 2, 1)); // 4 5 6 7 '
+    __m256d v_x2_src_p0_d = _mm256_cvtepi32_pd(v_x2_b1);   
+    __m256d v_x2_src_p1_d = _mm256_cvtepi32_pd(v_x2_src_p2);   
+    __m256d v_x2_src_p2_d = _mm256_cvtepi32_pd(v_x2_src_p3);   
+    __m256d v_x2_src_p3_d = _mm256_cvtepi32_pd(v_x2_src_p4);  
+    // x * mul
+    __m256d v_x2_src_conv_p0 = _mm256_mul_pd(v_x2_src_p0_d, v_adf_p0);
+    __m256d v_x2_src_conv_p1 = _mm256_mul_pd(v_x2_src_p1_d, v_adf_p1);
+    __m256d v_x2_src_conv_p2 = _mm256_mul_pd(v_x2_src_p2_d, v_adf_p2);
+    __m256d v_x2_src_conv_p3 = _mm256_mul_pd(v_x2_src_p3_d, v_adf_p3);
+    // hadd
+    __m256d sum_x2 = _mm256_hadd_pd(v_x2_src_conv_p0, v_x2_src_conv_p1); // x01+x02, x21 + x22, x03+x04, x23+x24
+    __m128d sum_high_x2 = _mm256_extractf128_pd(sum_x2, 1);
+    __m128d res_x2_p0p1 = _mm_add_pd(sum_high_x2, _mm256_castpd256_pd128(sum_x2)); // x01+x02+x03+x04, x21+x22+x23+x24;
+    sum_x2 = _mm256_hadd_pd(v_x2_src_conv_p2, v_x2_src_conv_p3); 
+    sum_high_x2 = _mm256_extractf128_pd(sum_x2, 1);
+    __m128d res_x2_p2p3 = _mm_add_pd(sum_high_x2, _mm256_castpd256_pd128(sum_x2)); // x21+x22+x23+x24, x31+x32+x33+x34;
+    __m256d res_x2 = _mm256_insertf128_pd(_mm256_castpd128_pd256(res_x2_p0p1), res_x2_p2p3, 1);
+
+    // x3
+    iOffset = iSrcOffset + 2 * poWK->nSrcXSize - 1;
+    unsigned char* p_src3 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iOffset;
+    // load p1 p2 p3 p4
+    __m128i v_x3 = _mm_loadl_epi64((__m128i*)p_src3);
+    __m256i v_x3_a = _mm256_cvtepi8_epi32(v_x3);
+    __m128i v_x3_b1 = _mm256_extractf128_si256(v_x3_a, 0); // 1234
+    __m128i v_x3_b2 = _mm256_extractf128_si256(v_x3_a, 1); // 5678 
+    __m128i v_x3_tmp = _mm_blend_epi32(v_x3_b1, v_x3_b2, 0b0001); 
+    __m128i v_x3_src_p2 = _mm_shuffle_epi32(v_x3_tmp, _MM_SHUFFLE(0, 3, 2, 1)); // 2 3 4 5
+    v_x3_tmp = _mm_shuffle_epi32(v_x3_src_p2, _MM_SHUFFLE(0, 3, 2, 1)); // 3 4 5 2
+    __m128i v_x3_tmp2 = _mm_shuffle_epi32(v_x3_b2, _MM_SHUFFLE(1, 0 ,3, 2)); // 7 8 5 6
+    __m128i v_x3_src_p3 = _mm_blend_epi32(v_x3_tmp, v_x3_tmp2, 0b1100);  // 3 4 5 6
+    v_x3_tmp = _mm_blend_epi32(v_x3_src_p3, v_x3_tmp2, 0b0001); // 7 4 5 6
+    __m128i v_x3_src_p4 = _mm_shuffle_epi32(v_x3_tmp, _MM_SHUFFLE(0, 3, 2, 1)); // 4 5 6 7 '
+    __m256d v_x3_src_p0_d = _mm256_cvtepi32_pd(v_x3_b1);   
+    __m256d v_x3_src_p1_d = _mm256_cvtepi32_pd(v_x3_src_p2);   
+    __m256d v_x3_src_p2_d = _mm256_cvtepi32_pd(v_x3_src_p3);   
+    __m256d v_x3_src_p3_d = _mm256_cvtepi32_pd(v_x3_src_p4);  
+    // x * mul
+    __m256d v_x3_src_conv_p0 = _mm256_mul_pd(v_x3_src_p0_d, v_adf_p0);
+    __m256d v_x3_src_conv_p1 = _mm256_mul_pd(v_x3_src_p1_d, v_adf_p1);
+    __m256d v_x3_src_conv_p2 = _mm256_mul_pd(v_x3_src_p2_d, v_adf_p2);
+    __m256d v_x3_src_conv_p3 = _mm256_mul_pd(v_x3_src_p3_d, v_adf_p3);
+    // hadd
+    // p0, p1
+    __m256d sum_x3 = _mm256_hadd_pd(v_x3_src_conv_p0, v_x3_src_conv_p1); // x01+x02, x31 + x32, x03+x04, x33+x34
+    __m128d sum_high_x3 = _mm256_extractf128_pd(sum_x3, 1);
+    __m128d res_x3_p0p1 = _mm_add_pd(sum_high_x3, _mm256_castpd256_pd128(sum_x3)); // x01+x02+x03+x04, x31+x32+x33+x34;
+    sum_x3 = _mm256_hadd_pd(v_x3_src_conv_p2, v_x3_src_conv_p3); 
+    sum_high_x3 = _mm256_extractf128_pd(sum_x3, 1);
+    __m128d res_x3_p2p3 = _mm_add_pd(sum_high_x3, _mm256_castpd256_pd128(sum_x3)); // x31+x32+x33+x34, x31+x32+x33+x34;
+    __m256d res_x3 = _mm256_insertf128_pd(_mm256_castpd128_pd256(res_x3_p0p1), res_x3_p2p3, 1);
+
+    /* cal y adfvalue and y mul sum
+    const int iSrcY = static_cast<int>(dfSrcY - 0.5);
+    const double dfDeltaY = dfSrcY - 0.5 - iSrcY;
+    const double dfDeltaY2 = dfDeltaY * dfDeltaY;
+    const double dfDeltaY3 = dfDeltaY2 * dfDeltaY;
+        (f1 + 0.5 * (distance1 * (f2 - f0) +                                       \
+                 distance2 * (2.0 * f0 - 5.0 * f1 + 4.0 * f2 - f3) +           \
+                 distance3 * (3.0 * (f1 - f2) + f3 - f0)))
+    */
+    __m256d v_fsrcy = _mm256_loadu_pd(dfSrcY);
+    __m256d v_const_y = _mm256_set1_pd(0.5);
+    __m256d v_fsrcy_corner = _mm256_sub_pd(v_fsrcy, v_const_y); 
+    __m128i v_isrcy = _mm256_cvttpd_epi32(v_fsrcy_corner);
+    __m256d v_dfy = _mm256_sub_pd(v_fsrcy_corner, _mm256_cvtepi32_pd(v_isrcy));
+    __m256d v_dfy2 = _mm256_mul_pd(v_dfy, v_dfy);
+    __m256d v_dfy3 = _mm256_mul_pd(v_dfy2, v_dfy);
+    __m256d v_res_y2 = _mm256_mul_pd(v_dfy, _mm256_sub_pd(res_x2, res_x0));
+    __m256d v_tmp_y = _mm256_add_pd(_mm256_fmsub_pd(_mm256_set1_pd(2.0), res_x0, _mm256_mul_pd(_mm256_set1_pd(5.0), res_x1)), _mm256_fmsub_pd(_mm256_set1_pd(4.0), res_x2, res_x3));
+    __m256d v_res_y3 = _mm256_mul_pd(v_dfy2, v_tmp_y);
+    v_tmp_y = _mm256_fmadd_pd(_mm256_set1_pd(3.0), _mm256_sub_pd(res_x1, res_x2), _mm256_sub_pd(res_x3, res_x0));
+    __m256d v_res_y4 = _mm256_mul_pd(v_dfy3, v_tmp_y); 
+    __m256d v_res_y = _mm256_add_pd(res_x1, _mm256_mul_pd(v_const_y, _mm256_add_pd(v_res_y2, _mm256_add_pd(v_res_y3, v_res_y4))));
+    // store
+    _mm256_storeu_pd(p_dst, v_res_y);
+    return true;
+}
+
 /************************************************************************/
 /*                          GWKLanczosSinc()                            */
 /************************************************************************/
@@ -5773,9 +6048,327 @@ gwkcheck_simple(GWKJobStruct *psJob, int _iDstX, int _iDstY, double& _padfX, dou
     return true;
 }
 
+CPL_INLINE void calculate_bilinear_border(const GDALWarpKernel *poWK, double* dst_trans, double* src_trans, double dfSrcCoordPrecision, int dst_x, int dst_y) {
+    double srcfx = 0., srcfy = 0.;
+    dst2src_trans_simple(dst_trans, src_trans, dst_x + 0.5 + poWK->nDstXOff, dst_y + 0.5 + poWK->nDstYOff, srcfx, srcfy);
+    const int nDstXSize = poWK->nDstXSize;
+    const int nSrcXSize = poWK->nSrcXSize;
+    const int nSrcYSize = poWK->nSrcYSize;
+    if (dfSrcCoordPrecision > 0.0)
+    {
+        printf(" [todo:jw] Something wrong!!!  contact jianwen yan for details!!!!\n");
+        /*
+        GWKRoundSourceCoordinates(
+                    nDstXSize, padfX, padfY, padfZ, pabSuccess, dfSrcCoordPrecision,
+                    dfErrorThreshold, poWK->pfnTransformer, psJob->pTransformerArg,
+                    0.5 + poWK->nDstXOff, iDstY + 0.5 + poWK->nDstYOff);
+        */
+    }
+    int iSrcX = static_cast<int>(srcfx + 1.0e-10) - poWK->nSrcXOff;
+    int iSrcY = static_cast<int>(srcfy + 1.0e-10) - poWK->nSrcYOff;
+    if (iSrcX == nSrcXSize) iSrcX--;
+    if (iSrcY == nSrcYSize) iSrcY--;
+    GPtrDiff_t iSrcOffset = iSrcX + static_cast<GPtrDiff_t>(iSrcY) * nSrcXSize;
+    const GPtrDiff_t iDstOffset = dst_x + static_cast<GPtrDiff_t>(dst_y) * nDstXSize;
+    for (int iBand = 0; iBand < poWK->nBands; iBand++)
+    {
+        unsigned char value = 0;
+        GWKCubicResampleNoMasks4SampleT(poWK, iBand, srcfx - poWK->nSrcXOff, srcfy - poWK->nSrcYOff, &value);
+        if (poWK->pafDstDensity) poWK->pafDstDensity[iDstOffset] = 1.0f; 
+        reinterpret_cast<unsigned char *>(poWK->papabyDstImage[iBand])[iDstOffset] = value;
+    }
+}
+
 /************************************************************************/
 template <class T, GDALResampleAlg eResample, int bUse4SamplesFormula>
 static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
+
+{
+    GWKJobStruct *psJob = static_cast<GWKJobStruct *>(pData);
+    GDALWarpKernel *poWK = psJob->poWK;
+    const int iYMin = psJob->iYMin;
+    const int iYMax = psJob->iYMax;
+    const double dfMultFactorVerticalShiftPipeline =
+        poWK->bApplyVerticalShift
+            ? CPLAtof(CSLFetchNameValueDef(
+                  poWK->papszWarpOptions, "MULT_FACTOR_VERTICAL_SHIFT_PIPELINE",
+                  "1.0"))
+            : 0.0;
+
+    const int nDstXSize = poWK->nDstXSize;
+    const int nSrcXSize = poWK->nSrcXSize;
+    const int nSrcYSize = poWK->nSrcYSize;
+
+    /* -------------------------------------------------------------------- */
+    /*      Allocate x,y,z coordinate arrays for transformation ... one     */
+    /*      scanlines worth of positions.                                   */
+    /* -------------------------------------------------------------------- */
+
+    // For x, 2 *, because we cache the precomputed values at the end.
+    double *padfX =
+        static_cast<double *>(CPLMalloc(2 * sizeof(double) * nDstXSize));
+    double *padfY =
+        static_cast<double *>(CPLMalloc(sizeof(double) * nDstXSize));
+    double *padfZ =
+        static_cast<double *>(CPLMalloc(sizeof(double) * nDstXSize));
+    int *pabSuccess = static_cast<int *>(CPLMalloc(sizeof(int) * nDstXSize));
+
+    const int nXRadius = poWK->nXRadius;
+    double *padfWeight =
+        static_cast<double *>(CPLCalloc(1 + nXRadius * 2, sizeof(double)));
+    const double dfSrcCoordPrecision = CPLAtof(CSLFetchNameValueDef(
+        poWK->papszWarpOptions, "SRC_COORD_PRECISION", "0"));
+    const double dfErrorThreshold = CPLAtof(
+        CSLFetchNameValueDef(poWK->papszWarpOptions, "ERROR_THRESHOLD", "0"));
+    ApproxTransformInfo *psATInfo = static_cast<ApproxTransformInfo *>(psJob->pTransformerArg);
+    GDALGenImgProjTransformInfo *psInfo =
+    static_cast<GDALGenImgProjTransformInfo *>(psATInfo->pBaseCBData);
+    double* padfGeoTransform = psInfo->adfDstGeoTransform;
+    padfGeoTransform = psInfo->adfSrcInvGeoTransform;
+
+    // Precompute values.
+    for (int iDstX = 0; iDstX < nDstXSize; iDstX++)
+        padfX[nDstXSize + iDstX] = iDstX + 0.5 + poWK->nDstXOff;
+    
+    // calculate reprojected dst area in src aoi
+    int dst_y_start = INT_MAX, dst_y_end = INT_MIN;
+    for(int dst_y = iYMin; dst_y < iYMax; ++dst_y) {
+        double src_x = 0., src_y = 0.;
+        int dst_x = 0;
+        dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dst_x + 0.5 + poWK->nDstXOff, dst_y + 0.5 + poWK->nDstYOff, src_x, src_y);
+        if (gwkcheck_simple(psJob, dst_x, dst_y, src_x, src_y, nSrcXSize, nSrcYSize, psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform)){
+            dst_y_start = dst_y <= dst_y_start? dst_y: dst_y_start;
+            dst_y_end = dst_y >= dst_y_end ? dst_y : dst_y_end;
+        }
+    }
+    int dst_x_start = INT_MAX, dst_x_end = INT_MIN;
+    for(int dst_x = 0; dst_x < nDstXSize; ++dst_x) {
+        double src_x = 0., src_y = 0.;
+        int dst_y = dst_y_start;
+        dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dst_x + 0.5 + poWK->nDstXOff, dst_y + 0.5 + poWK->nDstYOff, src_x, src_y);
+        if (gwkcheck_simple(psJob, dst_x, dst_y, src_x, src_y, nSrcXSize, nSrcYSize, psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform)){
+            dst_x_start = dst_x <= dst_x_start? dst_x: dst_x_start;
+            dst_x_end = dst_x >= dst_x_end ? dst_x : dst_x_end;
+        }
+    }
+    // calculate dst bilinear border area
+    int dst_y_boder_up = dst_y_start - 1, dst_y_boder_down = dst_y_end + 1;
+    int dst_x_boder_left = dst_x_start - 1, dst_x_boder_right = dst_x_end + 1;  
+    for(int dst_y = dst_y_start; dst_y <= dst_y_end; ++dst_y) {
+        bool b_find_tl = false;
+        for(int dst_x = dst_x_start; dst_x <= dst_x_end; ++dst_x) {
+            double src_x = 0., src_y = 0.;
+            dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dst_x + 0.5 + poWK->nDstXOff, dst_y + 0.5 + poWK->nDstYOff, src_x, src_y);
+            const int iSrcX = static_cast<int>(src_x - 0.5);
+            const int iSrcY = static_cast<int>(src_y - 0.5);
+            if (!(iSrcX - 1 < 0 || iSrcX + 2 >= poWK->nSrcXSize || iSrcY - 1 < 0 || iSrcY + 2 >= poWK->nSrcYSize)) {
+               dst_y_boder_up = dst_y - 1;
+               dst_x_boder_left = dst_x - 1;
+               b_find_tl = true;
+               break;
+            }
+        }
+        if(b_find_tl) break;
+    }
+    for(int dst_y = dst_y_boder_up + 1; dst_y <= dst_y_end; ++dst_y) {
+        double src_x = 0., src_y = 0.;
+        int dst_x = dst_x_boder_left + 1; 
+        dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dst_x + 0.5 + poWK->nDstXOff, dst_y + 0.5 + poWK->nDstYOff, src_x, src_y);
+        const int iSrcY = static_cast<int>(src_y - 0.5);
+        if(iSrcY - 1 < 0 || iSrcY + 2 >= poWK->nSrcYSize) {
+            dst_y_boder_down = dst_y;
+            break;
+        }
+    }
+    for(int dst_x = dst_x_boder_left + 1; dst_x <= dst_x_end; ++dst_x) {
+        double src_x = 0., src_y = 0.;
+        int dst_y = dst_y_boder_up + 1; 
+        dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dst_x + 0.5 + poWK->nDstXOff, dst_y + 0.5 + poWK->nDstYOff, src_x, src_y);
+        const int iSrcX = static_cast<int>(src_x - 0.5);
+        if(iSrcX - 1 < 0 || iSrcX + 2 >= poWK->nSrcXSize) {
+            dst_x_boder_right = dst_x;
+            break;
+        }
+    }
+    // calculate dst bilinear border first
+    for (int iDstY = dst_y_start; iDstY <= dst_y_boder_up; iDstY++)
+    {
+        for (int iDstX = dst_x_start; iDstX <= dst_x_end; iDstX++) {
+            calculate_bilinear_border(poWK, psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dfSrcCoordPrecision, iDstX, iDstY);
+        }
+    }
+    for (int iDstY = dst_y_boder_down; iDstY <= dst_y_end; iDstY++)
+    {
+        for (int iDstX = dst_x_start; iDstX <= dst_x_end; iDstX++) {
+            calculate_bilinear_border(poWK, psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dfSrcCoordPrecision, iDstX, iDstY);
+        }
+    }
+    for (int iDstY = dst_y_boder_up + 1; iDstY <= dst_y_boder_down - 1; iDstY++)
+    {
+        for (int iDstX = dst_x_start; iDstX <= dst_x_boder_left; iDstX++) {
+            calculate_bilinear_border(poWK, psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dfSrcCoordPrecision, iDstX, iDstY);
+        }
+        for (int iDstX = dst_x_boder_right; iDstX <= dst_x_end; iDstX++) {
+            calculate_bilinear_border(poWK, psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dfSrcCoordPrecision, iDstX, iDstY);
+        }
+    }
+    /* ==================================================================== */
+    /*      Loop over output lines.                                         */
+    /* ==================================================================== */
+    printf("xse: %d %d yse: %d %d\n", dst_x_start, dst_x_end, dst_y_start, dst_y_end);
+    printf("border xse: %d %d yse: %d %d\n", dst_x_boder_left + 1, dst_x_boder_right - 1, dst_y_boder_up + 1, dst_y_boder_down - 1);
+    for (int iDstY = dst_y_boder_up + 1; iDstY <= dst_y_boder_down - 1; iDstY++)
+    {
+        for (int iDstX = dst_x_boder_left + 1; iDstX <= dst_x_boder_right - 1; iDstX++)
+        {
+            double dstfx= iDstX + 0.5 + poWK->nDstXOff, dstfy = iDstY + 0.5 + poWK->nDstYOff;
+            double srcfx = 0., srcfy = 0.;
+            //panSuccess[i] = (padfX[i] != HUGE_VAL && padfY[i] != HUGE_VAL);
+            //pabSuccess[i] = 1; 
+            padfGeoTransform = psInfo->adfDstGeoTransform;
+            double dfNewX = padfGeoTransform[0] +
+                                  dstfx * padfGeoTransform[1] +
+                                  dstfy * padfGeoTransform[2];
+            double dfNewY = padfGeoTransform[3] +
+                                  dstfx * padfGeoTransform[4] +
+                                  dstfy * padfGeoTransform[5];
+            padfGeoTransform = psInfo->adfSrcInvGeoTransform; 
+            srcfx = padfGeoTransform[0] +
+                                  dfNewX * padfGeoTransform[1] +
+                                  dfNewY * padfGeoTransform[2];
+            srcfy = padfGeoTransform[3] +
+                                  dfNewX * padfGeoTransform[4] +
+                                  dfNewY * padfGeoTransform[5];
+            if (dfSrcCoordPrecision > 0.0)
+            {
+                printf(" [todo:jw] Something wrong!!!  contact jianwen yan for details!!!!\n");
+                GWKRoundSourceCoordinates(
+                    nDstXSize, padfX, padfY, padfZ, pabSuccess, dfSrcCoordPrecision,
+                    dfErrorThreshold, poWK->pfnTransformer, psJob->pTransformerArg,
+                    0.5 + poWK->nDstXOff, iDstY + 0.5 + poWK->nDstYOff);
+            }
+
+            /* ====================================================================
+             */
+            /*      Loop over pixels in output scanline. */
+            /* ====================================================================
+            */
+            int iSrcX = static_cast<int>(srcfx + 1.0e-10) - poWK->nSrcXOff;
+            int iSrcY = static_cast<int>(srcfy + 1.0e-10) - poWK->nSrcYOff;
+            if (iSrcX == nSrcXSize) iSrcX--;
+            if (iSrcY == nSrcYSize) iSrcY--;
+            GPtrDiff_t iSrcOffset = iSrcX + static_cast<GPtrDiff_t>(iSrcY) * nSrcXSize;
+
+            /* ====================================================================
+             */
+            /*      Loop processing each band. */
+            /* ====================================================================
+             */
+            const GPtrDiff_t iDstOffset =
+                iDstX + static_cast<GPtrDiff_t>(iDstY) * nDstXSize;
+
+            for (int iBand = 0; iBand < poWK->nBands; iBand++)
+            {
+                T value = 0;
+                if (eResample == GRA_NearestNeighbour)
+                {
+                    value = reinterpret_cast<T *>(
+                        poWK->papabySrcImage[iBand])[iSrcOffset];
+                }
+                else if (bUse4SamplesFormula)
+                {
+                    if (eResample == GRA_Bilinear)
+                        GWKBilinearResampleNoMasks4SampleT(
+                            poWK, iBand, srcfx - poWK->nSrcXOff,
+                            srcfy - poWK->nSrcYOff, &value);
+                    else 
+                        GWKCubicResampleNoMasks4SampleT_2(
+                            poWK, iBand, srcfx - poWK->nSrcXOff,
+                            srcfy - poWK->nSrcYOff, &value);
+                }
+                else
+                {
+                    GWKResampleNoMasksT(
+                        poWK, iBand, srcfx - poWK->nSrcXOff,
+                        srcfy - poWK->nSrcYOff, &value, padfWeight);
+                }
+
+                if (poWK->bApplyVerticalShift)
+                {
+                    if (!std::isfinite(padfZ[iDstX]))
+                        continue;
+                    // Subtract padfZ[] since the coordinate transformation is
+                    // from target to source
+                    value = GWKClampValueT<T>(
+                        value * poWK->dfMultFactorVerticalShift -
+                        padfZ[iDstX] * dfMultFactorVerticalShiftPipeline);
+                }
+
+                if (poWK->pafDstDensity)
+                    poWK->pafDstDensity[iDstOffset] = 1.0f;
+                
+                reinterpret_cast<T *>(poWK->papabyDstImage[iBand])[iDstOffset] =
+                    value;
+            }
+        }
+
+        /* --------------------------------------------------------------------
+         */
+        /*      Report progress to the user, and optionally cancel out. */
+        /* --------------------------------------------------------------------
+         */
+        if (psJob->pfnProgress && psJob->pfnProgress(psJob))
+            break;
+    }
+#if 1
+    std::string f1 = "/root/gdal-compile/ori_c1.dat";
+    std::string f2 = "/root/gdal-compile/ori_c2.dat";
+    std::string f3 = "/root/gdal-compile/ori_c3.dat";
+    std::string f1c = "/root/gdal-compile/cur_c1.dat";
+    std::string f2c = "/root/gdal-compile/cur_c2.dat";
+    std::string f3c = "/root/gdal-compile/cur_c3.dat";
+    saveArrayToFile(poWK->papabyDstImage[0], poWK->nDstYSize, poWK->nDstXSize, f1c);
+    saveArrayToFile(poWK->papabyDstImage[1], poWK->nDstYSize, poWK->nDstXSize, f2c);
+    saveArrayToFile(poWK->papabyDstImage[2], poWK->nDstYSize, poWK->nDstXSize, f3c);
+
+    unsigned char* c1 = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+    unsigned char* c2 = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+    unsigned char* c3 = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+
+    unsigned char* c1c = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+    unsigned char* c2c = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+    unsigned char* c3c = static_cast<unsigned char*>(std::malloc(sizeof(unsigned char) * poWK->nDstYSize * poWK->nDstXSize));
+
+    std::cout << poWK->nDstYSize << poWK->nDstXSize << std::endl;
+    loadArrayFromFile(c1, poWK->nDstYSize, poWK->nDstXSize, f1);
+    loadArrayFromFile(c2, poWK->nDstYSize, poWK->nDstXSize, f2);
+    loadArrayFromFile(c3, poWK->nDstYSize, poWK->nDstXSize, f3);
+
+    loadArrayFromFile(c1c, poWK->nDstYSize, poWK->nDstXSize, f1c);
+    loadArrayFromFile(c2c, poWK->nDstYSize, poWK->nDstXSize, f2c);
+    loadArrayFromFile(c3c, poWK->nDstYSize, poWK->nDstXSize, f3c);
+
+    for(int i = 0; i < poWK->nDstYSize * poWK->nDstXSize; ++i) {
+        if(c1[i] != c1c[i] || c2[i] != c2c[i] || c3[i] != c3c[i]) {
+            printf(" x = %d, y = %d, ori: %hhu %hhu %hhu cur: %hhu %hhu %hhu\n!!\n", i % 5600, i / 5600, c1[i], c2[i], c3[i], c1c[i], c2c[i], c3c[i]);
+        }
+    }
+#endif
+
+
+    /* -------------------------------------------------------------------- */
+    /*      Cleanup and return.                                             */
+    /* -------------------------------------------------------------------- */
+    CPLFree(padfX);
+    CPLFree(padfY);
+    CPLFree(padfZ);
+    CPLFree(pabSuccess);
+    CPLFree(padfWeight);
+}
+
+/************************************************************************/
+template <class T, GDALResampleAlg eResample, int bUse4SamplesFormula>
+static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal_bkp(void *pData)
 
 {
     GWKJobStruct *psJob = static_cast<GWKJobStruct *>(pData);
