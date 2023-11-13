@@ -6179,8 +6179,8 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
         for(int dst_x = dst_x_start; dst_x <= dst_x_end; ++dst_x) {
             double src_x = 0., src_y = 0.;
             dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dst_x + 0.5 + poWK->nDstXOff, dst_y + 0.5 + poWK->nDstYOff, src_x, src_y);
-            const int iSrcX = static_cast<int>(src_x - 0.5);
-            const int iSrcY = static_cast<int>(src_y - 0.5);
+            const int iSrcX = static_cast<int>(src_x - poWK->nSrcXOff - 0.5);
+            const int iSrcY = static_cast<int>(src_y - poWK->nSrcYOff - 0.5);
             if (!(iSrcX - 1 < 0 || iSrcX + 2 >= poWK->nSrcXSize || iSrcY - 1 < 0 || iSrcY + 2 >= poWK->nSrcYSize)) {
                dst_y_boder_up = dst_y - 1;
                dst_x_boder_left = dst_x - 1;
@@ -6194,7 +6194,7 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
         double src_x = 0., src_y = 0.;
         int dst_x = dst_x_boder_left + 1; 
         dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dst_x + 0.5 + poWK->nDstXOff, dst_y + 0.5 + poWK->nDstYOff, src_x, src_y);
-        const int iSrcY = static_cast<int>(src_y - 0.5);
+        const int iSrcY = static_cast<int>(src_y - poWK->nSrcYOff - 0.5);
         if(iSrcY - 1 < 0 || iSrcY + 2 >= poWK->nSrcYSize) {
             dst_y_boder_down = dst_y;
             break;
@@ -6204,7 +6204,7 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
         double src_x = 0., src_y = 0.;
         int dst_y = dst_y_boder_up + 1; 
         dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dst_x + 0.5 + poWK->nDstXOff, dst_y + 0.5 + poWK->nDstYOff, src_x, src_y);
-        const int iSrcX = static_cast<int>(src_x - 0.5);
+        const int iSrcX = static_cast<int>(src_x - poWK->nSrcXOff - 0.5);
         if(iSrcX - 1 < 0 || iSrcX + 2 >= poWK->nSrcXSize) {
             dst_x_boder_right = dst_x;
             break;
