@@ -3433,10 +3433,10 @@ bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, const int i
     
     // x1
     // load p1 p2 p3 p4
-    unsigned char* p_src_x1_p0 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p0;
-    unsigned char* p_src_x1_p1 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p1;
-    unsigned char* p_src_x1_p2 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p2;
-    unsigned char* p_src_x1_p3 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p3;
+    unsigned char* p_src_x1_p0 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p0 - 1;
+    unsigned char* p_src_x1_p1 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p1 - 1;
+    unsigned char* p_src_x1_p2 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p2 - 1;
+    unsigned char* p_src_x1_p3 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p3 - 1;
     __m128i v_x1_p0 = _mm_loadl_epi64((__m128i*)p_src_x1_p0);
     v_tmp = _mm256_cvtepi8_epi32(v_x1_p0);
     __m128i v_x1_p0_i = _mm256_extractf128_si256(v_tmp, 0); // x1 p0 1 2 3 4
@@ -3466,7 +3466,7 @@ bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, const int i
     sum_high_x1 = _mm256_extractf128_pd(sum_x1, 1);
     __m128d res_x1_p2p3 = _mm_add_pd(sum_high_x1, _mm256_castpd256_pd128(sum_x1)); // x21+x22+x23+x24, x31+x32+x33+x34;
     __m256d res_x1 = _mm256_insertf128_pd(_mm256_castpd128_pd256(res_x1_p0p1), res_x1_p2p3, 1);
-
+    
     // x2
     // load p1 p2 p3 p4
     unsigned char* p_src_x2_p0 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p0 + poWK->nSrcXSize - 1;
@@ -3502,7 +3502,7 @@ bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, const int i
     sum_high_x2 = _mm256_extractf128_pd(sum_x2, 1);
     __m128d res_x2_p2p3 = _mm_add_pd(sum_high_x2, _mm256_castpd256_pd128(sum_x2)); // x21+x22+x23+x24, x31+x32+x33+x34;
     __m256d res_x2 = _mm256_insertf128_pd(_mm256_castpd128_pd256(res_x2_p0p1), res_x2_p2p3, 1);
-
+    
     // x3
     // load p1 p2 p3 p4
     unsigned char* p_src_x3_p0 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p0 + 2 * poWK->nSrcXSize - 1;
@@ -3532,14 +3532,14 @@ bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, const int i
     __m256d v_x3_src_conv_p3 = _mm256_mul_pd(v_x3_src_p3_d, v_adf_p3);
     // hadd
     // p0, p1
-    __m256d sum_x3 = _mm256_hadd_pd(v_x3_src_conv_p0, v_x3_src_conv_p1); // x01+x02, x31 + x32, x03+x04, x33+x34
+    __m256d sum_x3 = _mm256_hadd_pd(v_x3_src_conv_p0, v_x3_src_conv_p1); // x01+x02, x11 + x12, x03+x04, x13+x14
     __m128d sum_high_x3 = _mm256_extractf128_pd(sum_x3, 1);
-    __m128d res_x3_p0p1 = _mm_add_pd(sum_high_x3, _mm256_castpd256_pd128(sum_x3)); // x01+x02+x03+x04, x31+x32+x33+x34;
+    __m128d res_x3_p0p1 = _mm_add_pd(sum_high_x3, _mm256_castpd256_pd128(sum_x3)); // x01+x02+x03+x04, x11+x12+x13+x14;
     sum_x3 = _mm256_hadd_pd(v_x3_src_conv_p2, v_x3_src_conv_p3); 
     sum_high_x3 = _mm256_extractf128_pd(sum_x3, 1);
-    __m128d res_x3_p2p3 = _mm_add_pd(sum_high_x3, _mm256_castpd256_pd128(sum_x3)); // x31+x32+x33+x34, x31+x32+x33+x34;
+    __m128d res_x3_p2p3 = _mm_add_pd(sum_high_x3, _mm256_castpd256_pd128(sum_x3)); // x21+x22+x23+x24, x31+x32+x33+x34;
     __m256d res_x3 = _mm256_insertf128_pd(_mm256_castpd128_pd256(res_x3_p0p1), res_x3_p2p3, 1);
-
+   
     /* cal y adfvalue and y mul sum
     const int iSrcY = static_cast<int>(dfSrcY - 0.5);
     const double dfDeltaY = dfSrcY - 0.5 - iSrcY;
@@ -6247,8 +6247,8 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
             for(int i = 0; i < 4; i++) {
                 double srcfx = 0., srcfy = 0.;
                 dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, iDstX + i + 0.5 + poWK->nDstXOff, iDstY + 0.5 + poWK->nDstYOff, srcfx, srcfy);
-                int srcix = static_cast<int>(srcfx + 1.0e-10) - poWK->nSrcXOff;
-                int srciy = static_cast<int>(srcfy + 1.0e-10) - poWK->nSrcXOff;
+                int srcix = static_cast<int>(srcfx  - poWK->nSrcXOff - 0.5);
+                int srciy = static_cast<int>(srcfy - poWK->nSrcYOff - 0.5 );
                 if (srcix == nSrcXSize) srcix--;
                 if (srciy == nSrcYSize) srciy--;
                 if (dfSrcCoordPrecision > 0.0)
@@ -6373,7 +6373,7 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
         if (psJob->pfnProgress && psJob->pfnProgress(psJob))
             break;
     }
-#if 0
+#if 1
     std::string f1 = "/root/gdal-compile/ori_c1.dat";
     std::string f2 = "/root/gdal-compile/ori_c2.dat";
     std::string f3 = "/root/gdal-compile/ori_c3.dat";
