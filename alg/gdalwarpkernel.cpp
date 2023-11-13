@@ -6181,7 +6181,7 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
             dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dst_x + 0.5 + poWK->nDstXOff, dst_y + 0.5 + poWK->nDstYOff, src_x, src_y);
             const int iSrcX = static_cast<int>(src_x - poWK->nSrcXOff - 0.5);
             const int iSrcY = static_cast<int>(src_y - poWK->nSrcYOff - 0.5);
-            if (!(iSrcX - 1 < 0 || iSrcX + 2 >= poWK->nSrcXSize || iSrcY - 1 < 0 || iSrcY + 2 >= poWK->nSrcYSize)) {
+            if (!(iSrcX - 1 < 0 || iSrcX + 6 >= poWK->nSrcXSize || iSrcY - 1 < 0 || iSrcY + 2 >= poWK->nSrcYSize)) {
                dst_y_boder_up = dst_y - 1;
                dst_x_boder_left = dst_x - 1;
                b_find_tl = true;
@@ -6205,7 +6205,7 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
         int dst_y = dst_y_boder_up + 1; 
         dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dst_x + 0.5 + poWK->nDstXOff, dst_y + 0.5 + poWK->nDstYOff, src_x, src_y);
         const int iSrcX = static_cast<int>(src_x - poWK->nSrcXOff - 0.5);
-        if(iSrcX - 1 < 0 || iSrcX + 2 >= poWK->nSrcXSize) {
+        if(iSrcX - 1 < 0 || iSrcX + 6 >= poWK->nSrcXSize) {
             dst_x_boder_right = dst_x;
             break;
         }
