@@ -6088,7 +6088,6 @@ CPL_INLINE void calculate_bilinear_border(const GDALWarpKernel *poWK, double* ds
     int iSrcY = static_cast<int>(srcfy + 1.0e-10) - poWK->nSrcYOff;
     if (iSrcX == nSrcXSize) iSrcX--;
     if (iSrcY == nSrcYSize) iSrcY--;
-    GPtrDiff_t iSrcOffset = iSrcX + static_cast<GPtrDiff_t>(iSrcY) * nSrcXSize;
     const GPtrDiff_t iDstOffset = dst_x + static_cast<GPtrDiff_t>(dst_y) * nDstXSize;
     for (int iBand = 0; iBand < poWK->nBands; iBand++)
     {
@@ -6108,13 +6107,6 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
     GDALWarpKernel *poWK = psJob->poWK;
     const int iYMin = psJob->iYMin;
     const int iYMax = psJob->iYMax;
-    const double dfMultFactorVerticalShiftPipeline =
-        poWK->bApplyVerticalShift
-            ? CPLAtof(CSLFetchNameValueDef(
-                  poWK->papszWarpOptions, "MULT_FACTOR_VERTICAL_SHIFT_PIPELINE",
-                  "1.0"))
-            : 0.0;
-
     const int nDstXSize = poWK->nDstXSize;
     const int nSrcXSize = poWK->nSrcXSize;
     const int nSrcYSize = poWK->nSrcYSize;
@@ -6124,31 +6116,13 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
     /*      scanlines worth of positions.                                   */
     /* -------------------------------------------------------------------- */
 
-    // For x, 2 *, because we cache the precomputed values at the end.
-    double *padfX =
-        static_cast<double *>(CPLMalloc(2 * sizeof(double) * nDstXSize));
-    double *padfY =
-        static_cast<double *>(CPLMalloc(sizeof(double) * nDstXSize));
-    double *padfZ =
-        static_cast<double *>(CPLMalloc(sizeof(double) * nDstXSize));
-    int *pabSuccess = static_cast<int *>(CPLMalloc(sizeof(int) * nDstXSize));
-
-    const int nXRadius = poWK->nXRadius;
-    double *padfWeight =
-        static_cast<double *>(CPLCalloc(1 + nXRadius * 2, sizeof(double)));
     const double dfSrcCoordPrecision = CPLAtof(CSLFetchNameValueDef(
         poWK->papszWarpOptions, "SRC_COORD_PRECISION", "0"));
-    const double dfErrorThreshold = CPLAtof(
-        CSLFetchNameValueDef(poWK->papszWarpOptions, "ERROR_THRESHOLD", "0"));
     ApproxTransformInfo *psATInfo = static_cast<ApproxTransformInfo *>(psJob->pTransformerArg);
     GDALGenImgProjTransformInfo *psInfo =
     static_cast<GDALGenImgProjTransformInfo *>(psATInfo->pBaseCBData);
     double* padfGeoTransform = psInfo->adfDstGeoTransform;
     padfGeoTransform = psInfo->adfSrcInvGeoTransform;
-
-    // Precompute values.
-    for (int iDstX = 0; iDstX < nDstXSize; iDstX++)
-        padfX[nDstXSize + iDstX] = iDstX + 0.5 + poWK->nDstXOff;
     
     // calculate reprojected dst area in src aoi
     int dst_y_start = INT_MAX, dst_y_end = INT_MIN;
@@ -6295,10 +6269,10 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
             if (dfSrcCoordPrecision > 0.0)
             {
                 printf(" [todo:jw] Something wrong!!!  contact jianwen yan for details!!!!\n");
-                GWKRoundSourceCoordinates(
+                /*GWKRoundSourceCoordinates(
                     nDstXSize, padfX, padfY, padfZ, pabSuccess, dfSrcCoordPrecision,
                     dfErrorThreshold, poWK->pfnTransformer, psJob->pTransformerArg,
-                    0.5 + poWK->nDstXOff, iDstY + 0.5 + poWK->nDstYOff);
+                    0.5 + poWK->nDstXOff, iDstY + 0.5 + poWK->nDstYOff);*/
             }
 
             /* ====================================================================
@@ -6341,22 +6315,11 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
                 }
                 else
                 {
-                    GWKResampleNoMasksT(
+                    printf(" [todo:jw] Something wrong!!!  contact jianwen yan for details!!!!\n");
+                    /*GWKResampleNoMasksT(
                         poWK, iBand, srcfx - poWK->nSrcXOff,
-                        srcfy - poWK->nSrcYOff, &value, padfWeight);
+                        srcfy - poWK->nSrcYOff, &value, padfWeight);*/
                 }
-
-                if (poWK->bApplyVerticalShift)
-                {
-                    if (!std::isfinite(padfZ[iDstX]))
-                        continue;
-                    // Subtract padfZ[] since the coordinate transformation is
-                    // from target to source
-                    value = GWKClampValueT<T>(
-                        value * poWK->dfMultFactorVerticalShift -
-                        padfZ[iDstX] * dfMultFactorVerticalShiftPipeline);
-                }
-
                 if (poWK->pafDstDensity)
                     poWK->pafDstDensity[iDstOffset] = 1.0f;
                 
@@ -6412,11 +6375,6 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
     /* -------------------------------------------------------------------- */
     /*      Cleanup and return.                                             */
     /* -------------------------------------------------------------------- */
-    CPLFree(padfX);
-    CPLFree(padfY);
-    CPLFree(padfZ);
-    CPLFree(pabSuccess);
-    CPLFree(padfWeight);
 }
 
 /************************************************************************/
@@ -6597,7 +6555,7 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal_bkp(void *pData)
         if (psJob->pfnProgress && psJob->pfnProgress(psJob))
             break;
     }
-#if 1
+#if 0
     std::string f1 = "/root/gdal-compile/ori_c1.dat";
     std::string f2 = "/root/gdal-compile/ori_c2.dat";
     std::string f3 = "/root/gdal-compile/ori_c3.dat";
@@ -6643,6 +6601,173 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal_bkp(void *pData)
     CPLFree(padfWeight);
 }
 
+/************************************************************************/
+/*                GWKResampleNoMasksOrDstDensityOnlyThreadInternal()    */
+/************************************************************************/
+
+template <class T, GDALResampleAlg eResample, int bUse4SamplesFormula>
+static void GWKResampleNoMasksOrDstDensityOnlyThreadInternalOri(void *pData)
+
+{
+    GWKJobStruct *psJob = static_cast<GWKJobStruct *>(pData);
+    GDALWarpKernel *poWK = psJob->poWK;
+    const int iYMin = psJob->iYMin;
+    const int iYMax = psJob->iYMax;
+    const double dfMultFactorVerticalShiftPipeline =
+        poWK->bApplyVerticalShift
+            ? CPLAtof(CSLFetchNameValueDef(
+                  poWK->papszWarpOptions, "MULT_FACTOR_VERTICAL_SHIFT_PIPELINE",
+                  "1.0"))
+            : 0.0;
+
+    const int nDstXSize = poWK->nDstXSize;
+    const int nSrcXSize = poWK->nSrcXSize;
+    const int nSrcYSize = poWK->nSrcYSize;
+
+    /* -------------------------------------------------------------------- */
+    /*      Allocate x,y,z coordinate arrays for transformation ... one     */
+    /*      scanlines worth of positions.                                   */
+    /* -------------------------------------------------------------------- */
+
+    // For x, 2 *, because we cache the precomputed values at the end.
+    double *padfX =
+        static_cast<double *>(CPLMalloc(2 * sizeof(double) * nDstXSize));
+    double *padfY =
+        static_cast<double *>(CPLMalloc(sizeof(double) * nDstXSize));
+    double *padfZ =
+        static_cast<double *>(CPLMalloc(sizeof(double) * nDstXSize));
+    int *pabSuccess = static_cast<int *>(CPLMalloc(sizeof(int) * nDstXSize));
+
+    const int nXRadius = poWK->nXRadius;
+    double *padfWeight =
+        static_cast<double *>(CPLCalloc(1 + nXRadius * 2, sizeof(double)));
+    const double dfSrcCoordPrecision = CPLAtof(CSLFetchNameValueDef(
+        poWK->papszWarpOptions, "SRC_COORD_PRECISION", "0"));
+    const double dfErrorThreshold = CPLAtof(
+        CSLFetchNameValueDef(poWK->papszWarpOptions, "ERROR_THRESHOLD", "0"));
+
+    // Precompute values.
+    for (int iDstX = 0; iDstX < nDstXSize; iDstX++)
+        padfX[nDstXSize + iDstX] = iDstX + 0.5 + poWK->nDstXOff;
+
+    /* ==================================================================== */
+    /*      Loop over output lines.                                         */
+    /* ==================================================================== */
+    for (int iDstY = iYMin; iDstY < iYMax; iDstY++)
+    {
+        /* --------------------------------------------------------------------
+         */
+        /*      Setup points to transform to source image space. */
+        /* --------------------------------------------------------------------
+         */
+        memcpy(padfX, padfX + nDstXSize, sizeof(double) * nDstXSize);
+        const double dfY = iDstY + 0.5 + poWK->nDstYOff;
+        for (int iDstX = 0; iDstX < nDstXSize; iDstX++)
+            padfY[iDstX] = dfY;
+        memset(padfZ, 0, sizeof(double) * nDstXSize);
+
+        /* --------------------------------------------------------------------
+         */
+        /*      Transform the points from destination pixel/line coordinates */
+        /*      to source pixel/line coordinates. */
+        /* --------------------------------------------------------------------
+         */
+        poWK->pfnTransformer(psJob->pTransformerArg, TRUE, nDstXSize, padfX,
+                             padfY, padfZ, pabSuccess);
+        if (dfSrcCoordPrecision > 0.0)
+        {
+            GWKRoundSourceCoordinates(
+                nDstXSize, padfX, padfY, padfZ, pabSuccess, dfSrcCoordPrecision,
+                dfErrorThreshold, poWK->pfnTransformer, psJob->pTransformerArg,
+                0.5 + poWK->nDstXOff, iDstY + 0.5 + poWK->nDstYOff);
+        }
+
+        /* ====================================================================
+         */
+        /*      Loop over pixels in output scanline. */
+        /* ====================================================================
+         */
+        for (int iDstX = 0; iDstX < nDstXSize; iDstX++)
+        {
+            GPtrDiff_t iSrcOffset = 0;
+            if (!GWKCheckAndComputeSrcOffsets(psJob, pabSuccess, iDstX, iDstY,
+                                              padfX, padfY, nSrcXSize,
+                                              nSrcYSize, iSrcOffset))
+                continue;
+
+            /* ====================================================================
+             */
+            /*      Loop processing each band. */
+            /* ====================================================================
+             */
+            const GPtrDiff_t iDstOffset =
+                iDstX + static_cast<GPtrDiff_t>(iDstY) * nDstXSize;
+
+            for (int iBand = 0; iBand < poWK->nBands; iBand++)
+            {
+                T value = 0;
+                if (eResample == GRA_NearestNeighbour)
+                {
+                    value = reinterpret_cast<T *>(
+                        poWK->papabySrcImage[iBand])[iSrcOffset];
+                }
+                else if (bUse4SamplesFormula)
+                {
+                    if (eResample == GRA_Bilinear)
+                        GWKBilinearResampleNoMasks4SampleT(
+                            poWK, iBand, padfX[iDstX] - poWK->nSrcXOff,
+                            padfY[iDstX] - poWK->nSrcYOff, &value);
+                    else
+                        GWKCubicResampleNoMasks4SampleT(
+                            poWK, iBand, padfX[iDstX] - poWK->nSrcXOff,
+                            padfY[iDstX] - poWK->nSrcYOff, &value);
+                }
+                else
+                {
+                    GWKResampleNoMasksT(
+                        poWK, iBand, padfX[iDstX] - poWK->nSrcXOff,
+                        padfY[iDstX] - poWK->nSrcYOff, &value, padfWeight);
+                }
+
+                if (poWK->bApplyVerticalShift)
+                {
+                    if (!std::isfinite(padfZ[iDstX]))
+                        continue;
+                    // Subtract padfZ[] since the coordinate transformation is
+                    // from target to source
+                    value = GWKClampValueT<T>(
+                        value * poWK->dfMultFactorVerticalShift -
+                        padfZ[iDstX] * dfMultFactorVerticalShiftPipeline);
+                }
+
+                if (poWK->pafDstDensity)
+                    poWK->pafDstDensity[iDstOffset] = 1.0f;
+
+                reinterpret_cast<T *>(poWK->papabyDstImage[iBand])[iDstOffset] =
+                    value;
+            }
+        }
+
+        /* --------------------------------------------------------------------
+         */
+        /*      Report progress to the user, and optionally cancel out. */
+        /* --------------------------------------------------------------------
+         */
+        if (psJob->pfnProgress && psJob->pfnProgress(psJob))
+            break;
+    }
+
+    /* -------------------------------------------------------------------- */
+    /*      Cleanup and return.                                             */
+    /* -------------------------------------------------------------------- */
+    CPLFree(padfX);
+    CPLFree(padfY);
+    CPLFree(padfZ);
+    CPLFree(pabSuccess);
+    CPLFree(padfWeight);
+}
+
+
 template <class T, GDALResampleAlg eResample>
 static void GWKResampleNoMasksOrDstDensityOnlyThread(void *pData)
 {
@@ -6663,7 +6788,7 @@ static void GWKResampleNoMasksOrDstDensityOnlyHas4SampleThread(void *pData)
         GWKResampleNoMasksOrDstDensityOnlyThreadInternal<T, eResample, TRUE>(
             pData);
     else
-        GWKResampleNoMasksOrDstDensityOnlyThreadInternal<T, eResample, FALSE>(
+        GWKResampleNoMasksOrDstDensityOnlyThreadInternalOri<T, eResample, FALSE>(
             pData);
 }
 
