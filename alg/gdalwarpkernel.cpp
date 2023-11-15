@@ -3352,52 +3352,27 @@ bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, const int i
     __m256 v_adfcoeffs_1 = _mm256_fmadd_ps(v_dfx_half2, _mm256_sub_ps(v_dfx_three, _mm256_set1_ps(5.0)), v_const);
     __m256 v_adfcoeffs_2 = _mm256_mul_ps(v_dfx_half, _mm256_fmadd_ps(v_dfx, _mm256_sub_ps(_mm256_set1_ps(4.0), v_dfx_three), v_const));
     __m256 v_adfcoeffs_3 = _mm256_fmsub_ps(v_dfx_half2, v_dfx, v_dfx_half2);
-    // (todo: yjw) use simd to shuffle
-    float tmp[32], adfCoeffs[32];
-    _mm256_storeu_ps(tmp, v_adfcoeffs_0);
-    _mm256_storeu_ps(tmp + 8, v_adfcoeffs_1);
-    _mm256_storeu_ps(tmp + 16, v_adfcoeffs_2);
-    _mm256_storeu_ps(tmp + 24, v_adfcoeffs_3);
-    // weight p0
-    adfCoeffs[0] = tmp[0];
-    adfCoeffs[1] = tmp[8];
-    adfCoeffs[2] = tmp[16];
-    adfCoeffs[3] = tmp[24];
-    // weight p1
-    adfCoeffs[4] = tmp[1];
-    adfCoeffs[5] = tmp[9];
-    adfCoeffs[6] = tmp[17];
-    adfCoeffs[7] = tmp[25];
-    // weight p2
-    adfCoeffs[8] = tmp[2];
-    adfCoeffs[9] = tmp[10];
-    adfCoeffs[10] = tmp[18];
-    adfCoeffs[11] = tmp[26];
-    // weight p3
-    adfCoeffs[12] = tmp[3];
-    adfCoeffs[13] = tmp[11];
-    adfCoeffs[14] = tmp[19];
-    adfCoeffs[15] = tmp[27];
-    // weight p4
-    adfCoeffs[16] = tmp[4];
-    adfCoeffs[17] = tmp[12];
-    adfCoeffs[18] = tmp[20];
-    adfCoeffs[19] = tmp[28];
-    // weight p5
-    adfCoeffs[20] = tmp[5];
-    adfCoeffs[21] = tmp[13];
-    adfCoeffs[22] = tmp[21];
-    adfCoeffs[23] = tmp[29];
-    // weight p6
-    adfCoeffs[24] = tmp[6];
-    adfCoeffs[25] = tmp[14];
-    adfCoeffs[26] = tmp[22];
-    adfCoeffs[27] = tmp[30];
-    // weight p7
-    adfCoeffs[28] = tmp[7];
-    adfCoeffs[29] = tmp[15];
-    adfCoeffs[30] = tmp[23];
-    adfCoeffs[31] = tmp[31];
+    // use simd to transpose 4x8 to 8x4
+    float adfCoeffs[32];
+    __m256 row0 = v_adfcoeffs_0, row1 = v_adfcoeffs_1, row2 = v_adfcoeffs_2, row3 = v_adfcoeffs_3;
+    __m256 tmp3, tmp2, tmp1, tmp0;
+    tmp0 = _mm256_shuffle_ps(row0, row1, 0x44);
+    tmp2 = _mm256_shuffle_ps(row0, row1, 0xEE);
+    tmp1 = _mm256_shuffle_ps(row2, row3, 0x44);
+    tmp3 = _mm256_shuffle_ps(row2, row3, 0xEE);
+    row0 = _mm256_shuffle_ps(tmp0, tmp1, 0x88);
+    row1 = _mm256_shuffle_ps(tmp0, tmp1, 0xDD);
+    row2 = _mm256_shuffle_ps(tmp2, tmp3, 0x88);
+    row3 = _mm256_shuffle_ps(tmp2, tmp3, 0xDD);
+    __m128 v_adf_p0 = _mm256_castps256_ps128(row0);
+    __m128 v_adf_p1 = _mm256_castps256_ps128(row1);
+    __m128 v_adf_p2 = _mm256_castps256_ps128(row2);
+    __m128 v_adf_p3 = _mm256_castps256_ps128(row3);
+    __m128 v_adf_p4 = _mm256_extractf128_ps(row0, 1);
+    __m128 v_adf_p5 = _mm256_extractf128_ps(row1, 1);
+    __m128 v_adf_p6 = _mm256_extractf128_ps(row2, 1);
+    __m128 v_adf_p7 = _mm256_extractf128_ps(row3, 1);
+
     /* cal x mul sum
     for (GPtrDiff_t i = -1; i < 3; i++)
     {
@@ -3495,16 +3470,12 @@ bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, const int i
     __m256 v_x0x1_src_p6 = _mm256_cvtepi32_ps(_mm256_insertf128_si256(_mm256_castsi128_si256(v_x0_p6_i), v_x1_p6_i, 1));
     __m256 v_x0x1_src_p7 = _mm256_cvtepi32_ps(_mm256_insertf128_si256(_mm256_castsi128_si256(v_x0_p7_i), v_x1_p7_i, 1));
     // x * mul
-    __m128 v_adf_p0 = _mm_loadu_ps(adfCoeffs);
     __m256 v_adf_p0_2 = _mm256_insertf128_ps(_mm256_castps128_ps256(v_adf_p0), v_adf_p0, 1);
     __m256 v_x0x1_src_conv_p0 = _mm256_mul_ps(v_x0x1_src_p0, v_adf_p0_2); 
-    __m128 v_adf_p1 = _mm_loadu_ps(adfCoeffs + 4);
     __m256 v_adf_p1_2 = _mm256_insertf128_ps(_mm256_castps128_ps256(v_adf_p1), v_adf_p1, 1);
     __m256 v_x0x1_src_conv_p1 = _mm256_mul_ps(v_x0x1_src_p1, v_adf_p1_2); 
-    __m128 v_adf_p2 = _mm_loadu_ps(adfCoeffs + 8);
     __m256 v_adf_p2_2 = _mm256_insertf128_ps(_mm256_castps128_ps256(v_adf_p2), v_adf_p2, 1);
     __m256 v_x0x1_src_conv_p2 = _mm256_mul_ps(v_x0x1_src_p2, v_adf_p2_2); 
-    __m128 v_adf_p3 = _mm_loadu_ps(adfCoeffs + 12);
     __m256 v_adf_p3_2 = _mm256_insertf128_ps(_mm256_castps128_ps256(v_adf_p3), v_adf_p3, 1);
     __m256 v_x0x1_src_conv_p3 = _mm256_mul_ps(v_x0x1_src_p3, v_adf_p3_2);
     // hadd
@@ -3512,16 +3483,12 @@ bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, const int i
     __m256 v_sum_p2p3 = _mm256_hadd_ps(v_x0x1_src_conv_p2, v_x0x1_src_conv_p3);
     __m256 v_sum_p0p1p2p3_x0x1 = _mm256_hadd_ps(v_sum_p0p1, v_sum_p2p3); 
     // x * mul
-    __m128 v_adf_p4 = _mm_loadu_ps(adfCoeffs + 16);
     __m256 v_adf_p4_2 = _mm256_insertf128_ps(_mm256_castps128_ps256(v_adf_p4), v_adf_p4, 1);
     __m256 v_x0x1_src_conv_p4 = _mm256_mul_ps(v_x0x1_src_p4, v_adf_p4_2); 
-    __m128 v_adf_p5 = _mm_loadu_ps(adfCoeffs + 20);
     __m256 v_adf_p5_2 = _mm256_insertf128_ps(_mm256_castps128_ps256(v_adf_p5), v_adf_p5, 1);
     __m256 v_x0x1_src_conv_p5 = _mm256_mul_ps(v_x0x1_src_p5, v_adf_p5_2); 
-    __m128 v_adf_p6 = _mm_loadu_ps(adfCoeffs + 24);
     __m256 v_adf_p6_2 = _mm256_insertf128_ps(_mm256_castps128_ps256(v_adf_p6), v_adf_p6, 1);
     __m256 v_x0x1_src_conv_p6 = _mm256_mul_ps(v_x0x1_src_p6, v_adf_p6_2); 
-    __m128 v_adf_p7 = _mm_loadu_ps(adfCoeffs + 28);
     __m256 v_adf_p7_2 = _mm256_insertf128_ps(_mm256_castps128_ps256(v_adf_p7), v_adf_p7, 1);
     __m256 v_x0x1_src_conv_p7 = _mm256_mul_ps(v_x0x1_src_p7, v_adf_p7_2);
     // hadd
@@ -6427,6 +6394,7 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
         if (psJob->pfnProgress && psJob->pfnProgress(psJob))
             break;
     }
+
 #if 0
     std::string f1 = "/root/gdal-compile/ori_c1.dat";
     std::string f2 = "/root/gdal-compile/ori_c2.dat";
