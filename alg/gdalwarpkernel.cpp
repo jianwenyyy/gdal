@@ -3353,7 +3353,6 @@ bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, const int i
     __m256 v_adfcoeffs_2 = _mm256_mul_ps(v_dfx_half, _mm256_fmadd_ps(v_dfx, _mm256_sub_ps(_mm256_set1_ps(4.0), v_dfx_three), v_const));
     __m256 v_adfcoeffs_3 = _mm256_fmsub_ps(v_dfx_half2, v_dfx, v_dfx_half2);
     // use simd to transpose 4x8 to 8x4
-    float adfCoeffs[32];
     __m256 row0 = v_adfcoeffs_0, row1 = v_adfcoeffs_1, row2 = v_adfcoeffs_2, row3 = v_adfcoeffs_3;
     __m256 tmp3, tmp2, tmp1, tmp0;
     tmp0 = _mm256_shuffle_ps(row0, row1, 0x44);
@@ -6176,6 +6175,14 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
 
     const double dfSrcCoordPrecision = CPLAtof(CSLFetchNameValueDef(
         poWK->papszWarpOptions, "SRC_COORD_PRECISION", "0"));
+    if (dfSrcCoordPrecision > 0.0)
+    {
+        printf(" [todo:jw] Something wrong!!!  contact jianwen yan for details!!!!\n");
+                    /*GWKRoundSourceCoordinates(
+                    nDstXSize, padfX, padfY, padfZ, pabSuccess, dfSrcCoordPrecision,
+                    dfErrorThreshold, poWK->pfnTransformer, psJob->pTransformerArg,
+                    0.5 + poWK->nDstXOff, iDstY + 0.5 + poWK->nDstYOff);*/
+    }  
     ApproxTransformInfo *psATInfo = static_cast<ApproxTransformInfo *>(psJob->pTransformerArg);
     GDALGenImgProjTransformInfo *psInfo =
     static_cast<GDALGenImgProjTransformInfo *>(psATInfo->pBaseCBData);
@@ -6276,6 +6283,11 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
         int iDstX = dst_x_boder_left + 1; 
         for (; iDstX <= dst_x_boder_right - 8; iDstX+= 8)
         {
+            /*
+            double dfNewX = dst_trans[0] + dst_x * dst_trans[1] + dst_y * dst_trans[2];
+            double dfNewY = dst_trans[3] + dst_x * dst_trans[4] + dst_y * dst_trans[5];
+            src_x = src_trans[0] + dfNewX * src_trans[1] + dfNewY * src_trans[2];
+            src_y = src_trans[3] + dfNewX * src_trans[4] + dfNewY * src_trans[5];
             for(int i = 0; i < 8; i++) {
                 double srcfx = 0., srcfy = 0.;
                 dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, iDstX + i + 0.5 + poWK->nDstXOff, iDstY + 0.5 + poWK->nDstYOff, srcfx, srcfy);
@@ -6283,19 +6295,54 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
                 int srciy = static_cast<int>(srcfy - poWK->nSrcYOff - 0.5 );
                 if (srcix == nSrcXSize) srcix--;
                 if (srciy == nSrcYSize) srciy--;
-                if (dfSrcCoordPrecision > 0.0)
-                {
-                    printf(" [todo:jw] Something wrong!!!  contact jianwen yan for details!!!!\n");
-                    /*GWKRoundSourceCoordinates(
-                    nDstXSize, padfX, padfY, padfZ, pabSuccess, dfSrcCoordPrecision,
-                    dfErrorThreshold, poWK->pfnTransformer, psJob->pTransformerArg,
-                    0.5 + poWK->nDstXOff, iDstY + 0.5 + poWK->nDstYOff);*/
-                }
+
                 dfsrcx[i] = srcfx;
                 dfsrcy[i] = srcfy;
                 disrcx[i] = srcix;
                 disrcy[i] = srciy;
             }
+            */
+            double idstx_add_off = iDstX + 0.5 + poWK->nDstXOff;
+            double idsty_add_off = iDstY + 0.5 + poWK->nDstYOff;
+            double* dst_trans = psInfo->adfDstGeoTransform;
+            double* src_trans = psInfo->adfSrcInvGeoTransform; 
+            __m256d v_dstx = _mm256_set_pd(idstx_add_off + 3., idstx_add_off + 2., idstx_add_off + 1., idstx_add_off);
+            __m256d v_dsty = _mm256_set1_pd(idsty_add_off);
+            __m256d v_tmp = _mm256_fmadd_pd(v_dstx, _mm256_set1_pd(dst_trans[1]), _mm256_set1_pd(dst_trans[0]));
+            __m256d v_dfnewx = _mm256_add_pd(v_tmp, _mm256_mul_pd(v_dsty, _mm256_set1_pd(dst_trans[2])));
+            v_tmp = _mm256_fmadd_pd(v_dstx, _mm256_set1_pd(dst_trans[4]), _mm256_set1_pd(dst_trans[3]));
+            __m256d v_dfnewy = _mm256_add_pd(v_tmp, _mm256_mul_pd(v_dsty, _mm256_set1_pd(dst_trans[5])));           
+            v_tmp = _mm256_fmadd_pd(v_dfnewx, _mm256_set1_pd(src_trans[1]), _mm256_set1_pd(src_trans[0]));
+            __m256d v_srcx1 = _mm256_add_pd(v_tmp, _mm256_mul_pd(v_dfnewy, _mm256_set1_pd(src_trans[2])));
+            v_tmp = _mm256_fmadd_pd(v_dfnewx, _mm256_set1_pd(src_trans[4]), _mm256_set1_pd(src_trans[3]));
+            __m256d v_srcy1 = _mm256_add_pd(v_tmp, _mm256_mul_pd(v_dfnewy, _mm256_set1_pd(src_trans[5])));
+            __m128 v_fsrcx1 = _mm256_cvtpd_ps(v_srcx1);
+            __m128 v_fsrcy1 = _mm256_cvtpd_ps(v_srcy1); 
+
+            v_dstx = _mm256_set_pd(idstx_add_off + 7., idstx_add_off + 6., idstx_add_off + 5., idstx_add_off + 4.);
+            v_tmp = _mm256_fmadd_pd(v_dstx, _mm256_set1_pd(dst_trans[1]), _mm256_set1_pd(dst_trans[0]));
+            v_dfnewx = _mm256_add_pd(v_tmp, _mm256_mul_pd(v_dsty, _mm256_set1_pd(dst_trans[2])));
+            v_tmp = _mm256_fmadd_pd(v_dstx, _mm256_set1_pd(dst_trans[4]), _mm256_set1_pd(dst_trans[3]));
+            v_dfnewy = _mm256_add_pd(v_tmp, _mm256_mul_pd(v_dsty, _mm256_set1_pd(dst_trans[5])));           
+            v_tmp = _mm256_fmadd_pd(v_dfnewx, _mm256_set1_pd(src_trans[1]), _mm256_set1_pd(src_trans[0]));
+            __m256d v_srcx2 = _mm256_add_pd(v_tmp, _mm256_mul_pd(v_dfnewy, _mm256_set1_pd(src_trans[2])));
+            v_tmp = _mm256_fmadd_pd(v_dfnewx, _mm256_set1_pd(src_trans[4]), _mm256_set1_pd(src_trans[3]));
+            __m256d v_srcy2 = _mm256_add_pd(v_tmp, _mm256_mul_pd(v_dfnewy, _mm256_set1_pd(src_trans[5])));
+            __m128 v_fsrcx2 = _mm256_cvtpd_ps(v_srcx2);
+            __m128 v_fsrcy2 = _mm256_cvtpd_ps(v_srcy2);
+            
+            __m256 v_srcx = _mm256_insertf128_ps(_mm256_castps128_ps256(v_fsrcx1), v_fsrcx2, 1); 
+            __m256 v_srcy = _mm256_insertf128_ps(_mm256_castps128_ps256(v_fsrcy1), v_fsrcy2, 1); 
+
+
+            __m256 v_srcx_pixel = _mm256_sub_ps(v_srcx, _mm256_set1_ps(poWK->nSrcXOff + 0.5));
+            __m256 v_srcy_pixel = _mm256_sub_ps(v_srcy, _mm256_set1_ps(poWK->nSrcYOff + 0.5));
+            __m256i v_isrcx = _mm256_cvttps_epi32(v_srcx_pixel);
+            __m256i v_isrcy = _mm256_cvttps_epi32(v_srcy_pixel);
+            _mm256_storeu_ps(dfsrcx, v_srcx);
+            _mm256_storeu_ps(dfsrcy, v_srcy);
+            _mm256_storeu_si256((__m256i *)disrcx, v_isrcx);
+            _mm256_storeu_si256((__m256i *)disrcy, v_isrcy);
             const GPtrDiff_t iDstOffset =
                 iDstX + static_cast<GPtrDiff_t>(iDstY) * nDstXSize;
             for (int iBand = 0; iBand < poWK->nBands; iBand++)
