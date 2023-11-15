@@ -3398,16 +3398,16 @@ bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, const int i
     unsigned char* p_src_x0_p2 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p2 - poWK->nSrcXSize - 1;
     unsigned char* p_src_x0_p3 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p3 - poWK->nSrcXSize - 1;
     __m128i v_x0_p0 = _mm_loadl_epi64((__m128i*)p_src_x0_p0);
-    __m256i v_tmp = _mm256_cvtepi8_epi32(v_x0_p0);
+    __m256i v_tmp = _mm256_cvtepu8_epi32(v_x0_p0);
     __m128i v_x0_p0_i = _mm256_extractf128_si256(v_tmp, 0); // x0 p0 1 2 3 4
     __m128i v_x0_p1 = _mm_loadl_epi64((__m128i*)p_src_x0_p1);
-    v_tmp = _mm256_cvtepi8_epi32(v_x0_p1);
+    v_tmp = _mm256_cvtepu8_epi32(v_x0_p1);
     __m128i v_x0_p1_i = _mm256_extractf128_si256(v_tmp, 0); // x0 p1 1 2 3 4    
     __m128i v_x0_p2 = _mm_loadl_epi64((__m128i*)p_src_x0_p2);
-    v_tmp = _mm256_cvtepi8_epi32(v_x0_p2);
+    v_tmp = _mm256_cvtepu8_epi32(v_x0_p2);
     __m128i v_x0_p2_i = _mm256_extractf128_si256(v_tmp, 0); // x0 p2 1 2 3 4  
     __m128i v_x0_p3 = _mm_loadl_epi64((__m128i*)p_src_x0_p3);
-    v_tmp = _mm256_cvtepi8_epi32(v_x0_p3);
+    v_tmp = _mm256_cvtepu8_epi32(v_x0_p3);
     __m128i v_x0_p3_i = _mm256_extractf128_si256(v_tmp, 0); // x0 p3 1 2 3 4
     __m256d v_x0_src_p0_d = _mm256_cvtepi32_pd(v_x0_p0_i);   
     __m256d v_x0_src_p1_d = _mm256_cvtepi32_pd(v_x0_p1_i);   
@@ -3438,16 +3438,16 @@ bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, const int i
     unsigned char* p_src_x1_p2 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p2 - 1;
     unsigned char* p_src_x1_p3 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p3 - 1;
     __m128i v_x1_p0 = _mm_loadl_epi64((__m128i*)p_src_x1_p0);
-    v_tmp = _mm256_cvtepi8_epi32(v_x1_p0);
+    v_tmp = _mm256_cvtepu8_epi32(v_x1_p0);
     __m128i v_x1_p0_i = _mm256_extractf128_si256(v_tmp, 0); // x1 p0 1 2 3 4
     __m128i v_x1_p1 = _mm_loadl_epi64((__m128i*)p_src_x1_p1);
-    v_tmp = _mm256_cvtepi8_epi32(v_x1_p1);
+    v_tmp = _mm256_cvtepu8_epi32(v_x1_p1);
     __m128i v_x1_p1_i = _mm256_extractf128_si256(v_tmp, 0); // x1 p1 1 2 3 4    
     __m128i v_x1_p2 = _mm_loadl_epi64((__m128i*)p_src_x1_p2);
-    v_tmp = _mm256_cvtepi8_epi32(v_x1_p2);
+    v_tmp = _mm256_cvtepu8_epi32(v_x1_p2);
     __m128i v_x1_p2_i = _mm256_extractf128_si256(v_tmp, 0); // x1 p2 1 2 3 4  
     __m128i v_x1_p3 = _mm_loadl_epi64((__m128i*)p_src_x1_p3);
-    v_tmp = _mm256_cvtepi8_epi32(v_x1_p3);
+    v_tmp = _mm256_cvtepu8_epi32(v_x1_p3);
     __m128i v_x1_p3_i = _mm256_extractf128_si256(v_tmp, 0); // x1 p3 1 2 3 4
     __m256d v_x1_src_p0_d = _mm256_cvtepi32_pd(v_x1_p0_i);   
     __m256d v_x1_src_p1_d = _mm256_cvtepi32_pd(v_x1_p1_i);   
@@ -3474,16 +3474,16 @@ bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, const int i
     unsigned char* p_src_x2_p2 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p2 + poWK->nSrcXSize - 1;
     unsigned char* p_src_x2_p3 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p3 + poWK->nSrcXSize - 1;
     __m128i v_x2_p0 = _mm_loadl_epi64((__m128i*)p_src_x2_p0);
-    v_tmp = _mm256_cvtepi8_epi32(v_x2_p0);
+    v_tmp = _mm256_cvtepu8_epi32(v_x2_p0);
     __m128i v_x2_p0_i = _mm256_extractf128_si256(v_tmp, 0); // x2 p0 1 2 3 4
     __m128i v_x2_p1 = _mm_loadl_epi64((__m128i*)p_src_x2_p1);
-    v_tmp = _mm256_cvtepi8_epi32(v_x2_p1);
+    v_tmp = _mm256_cvtepu8_epi32(v_x2_p1);
     __m128i v_x2_p1_i = _mm256_extractf128_si256(v_tmp, 0); // x2 p1 1 2 3 4    
     __m128i v_x2_p2 = _mm_loadl_epi64((__m128i*)p_src_x2_p2);
-    v_tmp = _mm256_cvtepi8_epi32(v_x2_p2);
+    v_tmp = _mm256_cvtepu8_epi32(v_x2_p2);
     __m128i v_x2_p2_i = _mm256_extractf128_si256(v_tmp, 0); // x2 p2 1 2 3 4  
     __m128i v_x2_p3 = _mm_loadl_epi64((__m128i*)p_src_x2_p3);
-    v_tmp = _mm256_cvtepi8_epi32(v_x2_p3);
+    v_tmp = _mm256_cvtepu8_epi32(v_x2_p3);
     __m128i v_x2_p3_i = _mm256_extractf128_si256(v_tmp, 0); // x2 p3 1 2 3 4
     __m256d v_x2_src_p0_d = _mm256_cvtepi32_pd(v_x2_p0_i);   
     __m256d v_x2_src_p1_d = _mm256_cvtepi32_pd(v_x2_p1_i);   
@@ -3510,16 +3510,16 @@ bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, const int i
     unsigned char* p_src_x3_p2 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p2 + 2 * poWK->nSrcXSize - 1;
     unsigned char* p_src_x3_p3 = reinterpret_cast<unsigned char *>(poWK->papabySrcImage[iBand]) + iSrcOffset_p3 + 2 * poWK->nSrcXSize - 1;
     __m128i v_x3_p0 = _mm_loadl_epi64((__m128i*)p_src_x3_p0);
-    v_tmp = _mm256_cvtepi8_epi32(v_x3_p0);
+    v_tmp = _mm256_cvtepu8_epi32(v_x3_p0);
     __m128i v_x3_p0_i = _mm256_extractf128_si256(v_tmp, 0); // x3 p0 1 2 3 4
     __m128i v_x3_p1 = _mm_loadl_epi64((__m128i*)p_src_x3_p1);
-    v_tmp = _mm256_cvtepi8_epi32(v_x3_p1);
+    v_tmp = _mm256_cvtepu8_epi32(v_x3_p1);
     __m128i v_x3_p1_i = _mm256_extractf128_si256(v_tmp, 0); // x3 p1 1 2 3 4    
     __m128i v_x3_p2 = _mm_loadl_epi64((__m128i*)p_src_x3_p2);
-    v_tmp = _mm256_cvtepi8_epi32(v_x3_p2);
+    v_tmp = _mm256_cvtepu8_epi32(v_x3_p2);
     __m128i v_x3_p2_i = _mm256_extractf128_si256(v_tmp, 0); // x3 p2 1 2 3 4  
     __m128i v_x3_p3 = _mm_loadl_epi64((__m128i*)p_src_x3_p3);
-    v_tmp = _mm256_cvtepi8_epi32(v_x3_p3);
+    v_tmp = _mm256_cvtepu8_epi32(v_x3_p3);
     __m128i v_x3_p3_i = _mm256_extractf128_si256(v_tmp, 0); // x3 p3 1 2 3 4
     __m256d v_x3_src_p0_d = _mm256_cvtepi32_pd(v_x3_p0_i);   
     __m256d v_x3_src_p1_d = _mm256_cvtepi32_pd(v_x3_p1_i);   
@@ -3565,10 +3565,10 @@ bool GWKCubicResampleNoMasks4SampleTSimd(const GDALWarpKernel *poWK, const int i
     // store
     double p_dst_d[4];
     _mm256_storeu_pd(p_dst_d, v_res_y);
-    p_dst[0] = static_cast<unsigned char>(p_dst_d[0]);
-    p_dst[1] = static_cast<unsigned char>(p_dst_d[1]);
-    p_dst[2] = static_cast<unsigned char>(p_dst_d[2]);
-    p_dst[3] = static_cast<unsigned char>(p_dst_d[3]);
+    p_dst[0] = GWKClampValueT<unsigned char>(p_dst_d[0]);
+    p_dst[1] = GWKClampValueT<unsigned char>(p_dst_d[1]);
+    p_dst[2] = GWKClampValueT<unsigned char>(p_dst_d[2]);
+    p_dst[3] = GWKClampValueT<unsigned char>(p_dst_d[3]);
     return true;
 }
 
