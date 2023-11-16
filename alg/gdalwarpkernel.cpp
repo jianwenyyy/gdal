@@ -6126,23 +6126,17 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
     
     // calculate reprojected dst area in src aoi
     int dst_y_start = INT_MAX, dst_y_end = INT_MIN;
-    for(int dst_y = iYMin; dst_y < iYMax; ++dst_y) {
-        double src_x = 0., src_y = 0.;
-        int dst_x = 0;
-        dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dst_x + 0.5 + poWK->nDstXOff, dst_y + 0.5 + poWK->nDstYOff, src_x, src_y);
-        if (gwkcheck_simple(psJob, dst_x, dst_y, src_x, src_y, nSrcXSize, nSrcYSize, psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform)){
-            dst_y_start = dst_y <= dst_y_start? dst_y: dst_y_start;
-            dst_y_end = dst_y >= dst_y_end ? dst_y : dst_y_end;
-        }
-    }
     int dst_x_start = INT_MAX, dst_x_end = INT_MIN;
-    for(int dst_x = 0; dst_x < nDstXSize; ++dst_x) {
-        double src_x = 0., src_y = 0.;
-        int dst_y = dst_y_start;
-        dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dst_x + 0.5 + poWK->nDstXOff, dst_y + 0.5 + poWK->nDstYOff, src_x, src_y);
-        if (gwkcheck_simple(psJob, dst_x, dst_y, src_x, src_y, nSrcXSize, nSrcYSize, psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform)){
-            dst_x_start = dst_x <= dst_x_start? dst_x: dst_x_start;
-            dst_x_end = dst_x >= dst_x_end ? dst_x : dst_x_end;
+    for(int dst_y = iYMin; dst_y < iYMax; ++dst_y) {
+        for(int dst_x = 0; dst_x < nDstXSize; ++dst_x) {
+            double src_x = 0., src_y = 0.;
+            dst2src_trans_simple(psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform, dst_x + 0.5 + poWK->nDstXOff, dst_y + 0.5 + poWK->nDstYOff, src_x, src_y);
+            if (gwkcheck_simple(psJob, dst_x, dst_y, src_x, src_y, nSrcXSize, nSrcYSize, psInfo->adfDstGeoTransform, psInfo->adfSrcInvGeoTransform)){
+                dst_y_start = dst_y <= dst_y_start? dst_y: dst_y_start;
+                dst_y_end = dst_y >= dst_y_end ? dst_y : dst_y_end;
+                dst_x_start = dst_x <= dst_x_start? dst_x: dst_x_start;
+                dst_x_end = dst_x >= dst_x_end ? dst_x : dst_x_end;
+            }
         }
     }
     // calculate dst bilinear border area
