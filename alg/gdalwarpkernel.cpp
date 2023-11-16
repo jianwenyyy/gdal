@@ -6209,8 +6209,9 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
     /* ==================================================================== */
     /*      Loop over output lines.                                         */
     /* ==================================================================== */
-    //printf("xse: %d %d yse: %d %d\n", dst_x_start, dst_x_end, dst_y_start, dst_y_end);
-    //printf("border xse: %d %d yse: %d %d\n", dst_x_boder_left + 1, dst_x_boder_right - 1, dst_y_boder_up + 1, dst_y_boder_down - 1);
+ 
+    CPLDebug("GDALWarpKernel()::simd", "xse: %d %d yse: %d %d", dst_x_start, dst_x_end, dst_y_start, dst_y_end);
+    CPLDebug("GDALWarpKernel()::simd", "border xse: %d %d yse: %d %d", dst_x_boder_left + 1, dst_x_boder_right - 1, dst_y_boder_up + 1, dst_y_boder_down - 1);
     double dfsrcx[4], dfsrcy[4];
     int disrcx[4], disrcy[4];
     for (int iDstY = dst_y_boder_up + 1; iDstY <= dst_y_boder_down - 1; iDstY++)
@@ -6327,12 +6328,9 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
                     value;
             }
         }
+    }
 
-        /* --------------------------------------------------------------------
-         */
-        /*      Report progress to the user, and optionally cancel out. */
-        /* --------------------------------------------------------------------
-         */
+    for (int iDstY = iYMin; iDstY < iYMax; iDstY++){
         if (psJob->pfnProgress && psJob->pfnProgress(psJob))
             break;
     }
