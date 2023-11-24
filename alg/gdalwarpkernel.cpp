@@ -6777,6 +6777,23 @@ static void GWKResampleNoMasksOrDstDensityOnlyHas4SampleThread(void *pData)
     const bool bUse4SamplesFormula =
         poWK->dfXScale >= 0.95 && poWK->dfYScale >= 0.95;
     if (bUse4SamplesFormula)
+        GWKResampleNoMasksOrDstDensityOnlyThreadInternalOri<T, eResample, TRUE>(
+            pData);
+    else
+        GWKResampleNoMasksOrDstDensityOnlyThreadInternalOri<T, eResample, FALSE>(
+            pData);
+}
+
+template <class T, GDALResampleAlg eResample>
+static void GWKResampleNoMasksOrDstDensityOnlyHas4SampleThreadOnlyByte(void *pData)
+
+{
+    GWKJobStruct *psJob = static_cast<GWKJobStruct *>(pData);
+    GDALWarpKernel *poWK = psJob->poWK;
+    CPLAssert(eResample == GRA_Bilinear || eResample == GRA_Cubic);
+    const bool bUse4SamplesFormula =
+        poWK->dfXScale >= 0.95 && poWK->dfYScale >= 0.95;
+    if (bUse4SamplesFormula)
         GWKResampleNoMasksOrDstDensityOnlyThreadInternal<T, eResample, TRUE>(
             pData);
     else
@@ -6795,7 +6812,7 @@ static CPLErr GWKBilinearNoMasksOrDstDensityOnlyByte(GDALWarpKernel *poWK)
 {
     return GWKRun(
         poWK, "GWKBilinearNoMasksOrDstDensityOnlyByte",
-        GWKResampleNoMasksOrDstDensityOnlyHas4SampleThread<GByte,
+        GWKResampleNoMasksOrDstDensityOnlyHas4SampleThreadOnlyByte<GByte,
                                                            GRA_Bilinear>);
 }
 
@@ -6803,7 +6820,7 @@ static CPLErr GWKCubicNoMasksOrDstDensityOnlyByte(GDALWarpKernel *poWK)
 {
     return GWKRun(
         poWK, "GWKCubicNoMasksOrDstDensityOnlyByte",
-        GWKResampleNoMasksOrDstDensityOnlyHas4SampleThread<GByte, GRA_Cubic>);
+        GWKResampleNoMasksOrDstDensityOnlyHas4SampleThreadOnlyByte<GByte, GRA_Cubic>);
 }
 
 static CPLErr GWKCubicNoMasksOrDstDensityOnlyFloat(GDALWarpKernel *poWK)
