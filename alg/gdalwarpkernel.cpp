@@ -6074,16 +6074,6 @@ CPL_INLINE void calculate_bilinear_border(const GDALWarpKernel *poWK, double* ds
     const int nDstXSize = poWK->nDstXSize;
     const int nSrcXSize = poWK->nSrcXSize;
     const int nSrcYSize = poWK->nSrcYSize;
-    if (dfSrcCoordPrecision > 0.0)
-    {
-        printf(" [todo:jw] Something wrong!!!  contact jianwen yan for details!!!!\n");
-        /*
-        GWKRoundSourceCoordinates(
-                    nDstXSize, padfX, padfY, padfZ, pabSuccess, dfSrcCoordPrecision,
-                    dfErrorThreshold, poWK->pfnTransformer, psJob->pTransformerArg,
-                    0.5 + poWK->nDstXOff, iDstY + 0.5 + poWK->nDstYOff);
-        */
-    }
     int iSrcX = static_cast<int>(srcfx + 1.0e-10) - poWK->nSrcXOff;
     int iSrcY = static_cast<int>(srcfy + 1.0e-10) - poWK->nSrcYOff;
     if (iSrcX == nSrcXSize) iSrcX--;
@@ -6220,14 +6210,6 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
                 int srciy = static_cast<int>(srcfy - poWK->nSrcYOff - 0.5 );
                 if (srcix == nSrcXSize) srcix--;
                 if (srciy == nSrcYSize) srciy--;
-                if (dfSrcCoordPrecision > 0.0)
-                {
-                    printf(" [todo:jw] Something wrong!!!  contact jianwen yan for details!!!!\n");
-                    /*GWKRoundSourceCoordinates(
-                    nDstXSize, padfX, padfY, padfZ, pabSuccess, dfSrcCoordPrecision,
-                    dfErrorThreshold, poWK->pfnTransformer, psJob->pTransformerArg,
-                    0.5 + poWK->nDstXOff, iDstY + 0.5 + poWK->nDstYOff);*/
-                }
                 dfsrcx[i] = srcfx;
                 dfsrcy[i] = srcfy;
                 disrcx[i] = srcix;
@@ -6261,15 +6243,6 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternal(void *pData)
             srcfy = padfGeoTransform[3] +
                                   dfNewX * padfGeoTransform[4] +
                                   dfNewY * padfGeoTransform[5];
-            if (dfSrcCoordPrecision > 0.0)
-            {
-                printf(" [todo:jw] Something wrong!!!  contact jianwen yan for details!!!!\n");
-                /*GWKRoundSourceCoordinates(
-                    nDstXSize, padfX, padfY, padfZ, pabSuccess, dfSrcCoordPrecision,
-                    dfErrorThreshold, poWK->pfnTransformer, psJob->pTransformerArg,
-                    0.5 + poWK->nDstXOff, iDstY + 0.5 + poWK->nDstYOff);*/
-            }
-
             /* ====================================================================
              */
             /*      Loop over pixels in output scanline. */
@@ -6790,10 +6763,20 @@ static void GWKResampleNoMasksOrDstDensityOnlyHas4SampleThreadOnlyByte(void *pDa
 {
     GWKJobStruct *psJob = static_cast<GWKJobStruct *>(pData);
     GDALWarpKernel *poWK = psJob->poWK;
+    const double dfSrcCoordPrecision = CPLAtof(CSLFetchNameValueDef(
+        poWK->papszWarpOptions, "SRC_COORD_PRECISION", "0"));
     CPLAssert(eResample == GRA_Bilinear || eResample == GRA_Cubic);
     const bool bUse4SamplesFormula =
-        poWK->dfXScale >= 0.95 && poWK->dfYScale >= 0.95;
-    if (bUse4SamplesFormula)
+        poWK->dfXScale >= 0.95 && poWK->dfYScale >= 0.95;    
+    ApproxTransformInfo *psATInfo = static_cast<ApproxTransformInfo *>(psJob->pTransformerArg);
+    GDALGenImgProjTransformInfo *psInfo = static_cast<GDALGenImgProjTransformInfo *>(psATInfo->pBaseCBData);
+    bool bNoReproject = true, bNoSrcCoordPrecision = true;
+    if(psInfo->pReprojectArg != nullptr) {
+        bNoReproject = false;
+    } 
+    if(dfSrcCoordPrecision > 0.0) bNoSrcCoordPrecision = false; 
+    CPLDebug("GDALWarpKernel()::use_simd_cond", "bUse4SamplesFormula:%d bNoReproject:%d bNoSrcCoordPrecision:%d, should all be 1 to use simd impl", bUse4SamplesFormula, bNoReproject, bNoSrcCoordPrecision);
+    if (bUse4SamplesFormula && bNoReproject && bNoSrcCoordPrecision)
         GWKResampleNoMasksOrDstDensityOnlyThreadInternal<T, eResample, TRUE>(
             pData);
     else
