@@ -6776,12 +6776,15 @@ static void GWKResampleNoMasksOrDstDensityOnlyHas4SampleThreadOnlyByte(void *pDa
     } 
     if(dfSrcCoordPrecision > 0.0) bNoSrcCoordPrecision = false; 
     CPLDebug("GDALWarpKernel()::use_simd_cond", "bUse4SamplesFormula:%d bNoReproject:%d bNoSrcCoordPrecision:%d, should all be 1 to use simd impl", bUse4SamplesFormula, bNoReproject, bNoSrcCoordPrecision);
-    if (bUse4SamplesFormula && bNoReproject && bNoSrcCoordPrecision)
+    if (bUse4SamplesFormula && bNoReproject && bNoSrcCoordPrecision){
+        printf("use simd_version\n");
         GWKResampleNoMasksOrDstDensityOnlyThreadInternal<T, eResample, TRUE>(
             pData);
-    else
+    }
+    else {
         GWKResampleNoMasksOrDstDensityOnlyThreadInternalOri<T, eResample, FALSE>(
             pData);
+    }
 }
 
 static CPLErr GWKNearestNoMasksOrDstDensityOnlyByte(GDALWarpKernel *poWK)
