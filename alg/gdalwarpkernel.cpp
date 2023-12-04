@@ -6736,7 +6736,7 @@ static void GWKResampleNoMasksOrDstDensityOnlyThreadInternalOri(void *pData)
 template <class T, GDALResampleAlg eResample>
 static void GWKResampleNoMasksOrDstDensityOnlyThread(void *pData)
 {
-    GWKResampleNoMasksOrDstDensityOnlyThreadInternal<T, eResample, FALSE>(
+    GWKResampleNoMasksOrDstDensityOnlyThreadInternalOri<T, eResample, FALSE>(
         pData);
 }
 
